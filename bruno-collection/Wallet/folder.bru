@@ -1,0 +1,33 @@
+meta {
+  name: Wallet
+}
+
+script:pre-request {
+  // There is no HTTP login/token-issuance endpoint in this codebase yet
+  // (see CLAUDE.md "Known inconsistencies") — /wallets sits behind
+  // authMiddleware, which just verifies an HS256 JWT signed with JWT_SECRET
+  // and doesn't check any specific claim. So every request in this folder
+  // mints its own short-lived token here, signed with the environment's
+  // `jwt_secret` (must match the server's JWT_SECRET env var), instead of
+  // requiring you to paste one in by hand.
+  const CryptoJS = require("crypto-js");
+
+  function base64url(wordArray) {
+    return CryptoJS.enc.Base64.stringify(wordArray)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = { accountId: bru.getEnvVar("accountId") };
+
+  const encodedHeader = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(header)));
+  const encodedPayload = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(payload)));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+
+  const secret = bru.getEnvVar("jwt_secret");
+  const signature = base64url(CryptoJS.HmacSHA256(signingInput, secret));
+
+  bru.setVar("jwt_token", `${signingInput}.${signature}`);
+}

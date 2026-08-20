@@ -1,0 +1,29 @@
+meta {
+  name: Remittance
+}
+
+script:pre-request {
+  // Same rationale as Wallet/folder.bru: mints a JWT locally since there is
+  // no login endpoint to call. Signed against senderAccountId since the
+  // sender is the party authenticating the transfer.
+  const CryptoJS = require("crypto-js");
+
+  function base64url(wordArray) {
+    return CryptoJS.enc.Base64.stringify(wordArray)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = { accountId: bru.getEnvVar("senderAccountId") };
+
+  const encodedHeader = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(header)));
+  const encodedPayload = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(payload)));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+
+  const secret = bru.getEnvVar("jwt_secret");
+  const signature = base64url(CryptoJS.HmacSHA256(signingInput, secret));
+
+  bru.setVar("jwt_token", `${signingInput}.${signature}`);
+}

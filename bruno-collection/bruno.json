@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "Money Across Borders",
+  "type": "collection",
+  "ignore": ["node_modules", ".git"]
+}

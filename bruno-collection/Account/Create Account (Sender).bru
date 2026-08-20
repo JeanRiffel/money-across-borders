@@ -1,0 +1,44 @@
+meta {
+  name: Create Account (Sender)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/account
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+script:pre-request {
+  bru.setVar("senderEmail", `sender.${Date.now()}@example.com`);
+}
+
+body:json {
+  {
+    "email": "{{senderEmail}}",
+    "password": "SuperSecret123!"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.result && res.body.result.accountId) {
+    bru.setEnvVar("senderAccountId", res.body.result.accountId);
+    bru.setEnvVar("accountId", res.body.result.accountId);
+  }
+}
+
+docs {
+  Signup endpoint. Deliberately unauthenticated (no login/token-issuance
+  endpoint exists yet, so a brand-new user needs a way in before it can
+  hold a bearer token).
+
+  On success, stores the returned accountId in the environment variable
+  `senderAccountId` (and also in `accountId`, used by the Wallet requests
+  below) so you can chain straight into "Open Wallet" and "Send Remittance"
+  without copy-pasting IDs by hand.
+}

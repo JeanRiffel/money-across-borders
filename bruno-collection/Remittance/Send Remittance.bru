@@ -1,0 +1,51 @@
+meta {
+  name: Send Remittance
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{$guid}}
+  Authorization: Bearer {{jwt_token}}
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 10000
+  }
+}
+
+docs {
+  Sends 10000 minor units (= 100.00 USD) from the sender's USD wallet to
+  the recipient's BRL wallet, converted via the mocked static FX table
+  (MockExchangeRateProvider) and posted through the per-currency treasury
+  wallets so each currency's ledger nets to zero independently.
+
+  Prerequisites (run in order):
+    1. Account / Create Account (Sender)
+    2. Account / Create Account (Recipient)
+    3. Wallet / Open Wallet (Sender)   — must hold enough USD to cover
+       amountMinorUnits + fee
+    4. Wallet / Open Wallet (Recipient) — must exist in destinationCurrency
+
+  The Idempotency-Key header is a literal {{$guid}} — Bruno's built-in
+  random-UUID runtime variable — so replaying this request manually doesn't
+  collide with a previous send. Change amountMinorUnits or delete the
+  header if you deliberately want to test the idempotency short-circuit.
+
+  amountMinorUnits at or below 100000 (source-currency minor units, not
+  FX-normalized) succeeds without a KYC profile; above that, expect 403
+  (ComplianceRejectedError) — there's no HTTP endpoint to mark a
+  KycProfile VERIFIED in this codebase yet.
+}

@@ -1,0 +1,35 @@
+meta {
+  name: Open Wallet (Sender)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/wallets
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{jwt_token}}
+}
+
+body:json {
+  {
+    "accountId": "{{senderAccountId}}",
+    "currency": "USD",
+    "initialBalanceMinorUnits": 100000
+  }
+}
+
+docs {
+  Opens a USD wallet for the sender account, pre-funded with 100000 minor
+  units (= 1,000.00 USD) via `initialBalanceMinorUnits` — there is no real
+  deposit/funding rail in this MVP, so this field is the stand-in for
+  "money already in the wallet".
+
+  Supported currency codes: USD, BRL, EUR, GBP.
+
+  Run "Create Account (Sender)" first so `senderAccountId` is populated.
+}

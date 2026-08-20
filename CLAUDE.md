@@ -6,8 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Money Across Borders** (package name `money-across-borders`; the repo/folder is still named
 `clean-ledger`) is a **cross-border remittance platform** — multi-currency wallets, FX conversion, and
-international money transfer between platform accounts, in the spirit of **Wise, Nomad, and Remessa
-Online** — built as an architecture showcase: Clean Architecture, DDD, SOLID, ACID transactions,
+international money transfer between platform accounts, built as an architecture showcase: Clean Architecture, DDD, SOLID, ACID transactions,
 idempotency, and horizontal scalability, in Express + TypeScript. The payments domain is the vehicle for
 demonstrating the architecture, not the point of the project.
 

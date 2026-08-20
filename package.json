@@ -1,5 +1,5 @@
 {
-  "name": "api-pagination",
+  "name": "money-across-borders",
   "module": "index.ts",
   "private": true,
   "devDependencies": {

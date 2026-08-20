@@ -1,6 +1,14 @@
-# Clean Ledger — Distributed Payment & Accounting System
+# Money Across Borders — Cross-Border Payment Platform
 
-A **ledger-based payment processing system** designed to demonstrate **Clean Architecture, DDD, SOLID, ACID transactions, idempotency, and horizontal scalability** using a realistic fintech-inspired domain.
+A **cross-border remittance platform** (multi-currency wallets, FX conversion, and international money
+transfer — in the spirit of Wise, Nomad, and Remessa Online) designed to demonstrate **Clean Architecture,
+DDD, SOLID, ACID transactions, idempotency, and horizontal scalability** using a realistic fintech-inspired
+domain. It's still, first and foremost, an architecture showcase: the payments domain is the vehicle, not
+the point.
+
+> Note: the sections below this point predate the cross-border pivot and describe the project's original
+> account/ledger framing — see [CLAUDE.md](CLAUDE.md) for the current architecture and domain model
+> (wallets, ledger, exchange, compliance, remittance).
 
 This project is intentionally **small in surface area** (few endpoints) and **deep in architectural concepts**, focusing on correctness, consistency, and scalability rather than feature sprawl.
 

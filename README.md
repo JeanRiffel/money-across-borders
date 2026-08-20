@@ -1,7 +1,7 @@
 # Money Across Borders — Cross-Border Payment Platform
 
 A **cross-border remittance platform** (multi-currency wallets, FX conversion, and international money
-transfer — in the spirit of Wise, Nomad, and Remessa Online) designed to demonstrate **Clean Architecture,
+transfer) designed to demonstrate **Clean Architecture,
 DDD, SOLID, ACID transactions, idempotency, and horizontal scalability** using a realistic fintech-inspired
 domain. It's still, first and foremost, an architecture showcase: the payments domain is the vehicle, not
 the point.

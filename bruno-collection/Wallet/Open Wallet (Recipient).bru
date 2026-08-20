@@ -1,0 +1,34 @@
+meta {
+  name: Open Wallet (Recipient)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/wallets
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{jwt_token}}
+}
+
+body:json {
+  {
+    "accountId": "{{recipientAccountId}}",
+    "currency": "BRL",
+    "initialBalanceMinorUnits": 0
+  }
+}
+
+docs {
+  Opens a BRL wallet for the recipient account (destination currency for
+  the sample remittance below). initialBalanceMinorUnits defaults to 0
+  since the recipient doesn't need pre-funding to receive a transfer.
+
+  Supported currency codes: USD, BRL, EUR, GBP.
+
+  Run "Create Account (Recipient)" first so `recipientAccountId` is populated.
+}

@@ -1,0 +1,38 @@
+meta {
+  name: Create Account (Recipient)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/account
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+script:pre-request {
+  bru.setVar("recipientEmail", `recipient.${Date.now()}@example.com`);
+}
+
+body:json {
+  {
+    "email": "{{recipientEmail}}",
+    "password": "SuperSecret123!"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.result && res.body.result.accountId) {
+    bru.setEnvVar("recipientAccountId", res.body.result.accountId);
+  }
+}
+
+docs {
+  Same signup endpoint as "Create Account (Sender)", used a second time to
+  create the remittance's recipient account. Stores the returned accountId
+  in `recipientAccountId`.
+}

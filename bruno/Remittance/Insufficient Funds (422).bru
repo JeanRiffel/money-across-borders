@@ -1,0 +1,52 @@
+meta {
+  name: Insufficient Funds (422)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", "remit-insufficient-" + Date.now());
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 95000
+  }
+}
+
+tests {
+  test("status is 422 (InsufficientFundsError)", function () {
+    expect(res.getStatus()).to.equal(422);
+  });
+}
+
+docs {
+  Depends on run order: needs to run in the SAME server session, after "Send
+  Remittance (USD to BRL)" has already debited the sender's wallet down to
+  ~89,950. Asking to move 95,000 (itself still under the 100,000 compliance
+  threshold, so it reaches the balance check) then fails with 422.
+
+  If you run this in isolation against a freshly-opened 100,000-balance
+  wallet it will succeed instead (there's enough funds) — re-run "Send
+  Remittance (USD to BRL)" first, or lower this amount below the remaining
+  balance to see it succeed, or raise it to see the 422.
+}

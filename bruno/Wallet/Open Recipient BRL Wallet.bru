@@ -1,0 +1,46 @@
+meta {
+  name: Open Recipient BRL Wallet
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/wallets
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "accountId": "{{recipientAccountId}}",
+    "currency": "BRL"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("recipientWalletId", res.getBody().result.walletId);
+  }
+}
+
+tests {
+  test("status is 201", function () {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("balance defaults to 0", function () {
+    expect(res.getBody().result.balanceMinorUnits).to.equal(0);
+  });
+}
+
+docs {
+  `initialBalanceMinorUnits` omitted on purpose — defaults to 0. Requires
+  `recipientAccountId` (run Account → Create Recipient Account first).
+}

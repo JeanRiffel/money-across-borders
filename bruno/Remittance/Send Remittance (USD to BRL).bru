@@ -1,0 +1,63 @@
+meta {
+  name: Send Remittance (USD to BRL)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", "remit-" + Date.now());
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 10000
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("remittanceId", res.getBody().result.remittanceId);
+  }
+}
+
+tests {
+  test("status is 201", function () {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("status is COMPLETED", function () {
+    expect(res.getBody().result.status).to.equal("COMPLETED");
+  });
+  test("fee is 0.5% of the source amount", function () {
+    expect(res.getBody().result.feeMinorUnits).to.equal(50);
+  });
+}
+
+docs {
+  $100.00 USD -> BRL, well under the 100,000-minor-unit unverified-KYC
+  threshold (no verified KycProfile exists in this MVP — see CLAUDE.md), so
+  this succeeds without any compliance setup. 0.5% fee is debited from the
+  sender alongside the principal; the converted amount lands in the
+  recipient's BRL wallet at the mocked rate from `MockExchangeRateProvider`.
+
+  Sets `idempotencyKey` fresh on every run — "Retry Same Idempotency Key"
+  deliberately reuses whatever this request last set, to demo the cache hit.
+}

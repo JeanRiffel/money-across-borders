@@ -1,0 +1,38 @@
+docs {
+  # Money Across Borders — API collection
+
+  Covers every endpoint currently wired up end-to-end: account creation, opening a
+  currency wallet, and sending a cross-border remittance — plus a few requests that
+  deliberately trigger the documented error paths (401/403/409/422).
+
+  ## Setup
+
+  1. Start the server from the repo root: `bun run src/main/server.ts` (or `npm start`).
+  2. Select the **Local** environment (top-right environment picker). `baseUrl` defaults
+     to `http://localhost:3000`.
+  3. `POST /wallets` and `POST /remittances` sit behind `authMiddleware` and need a
+     bearer JWT. There is no login/token-issuance HTTP endpoint yet (see CLAUDE.md), so
+     mint one manually from the repo root and paste it into the environment's
+     `jwtToken` variable:
+
+     ```
+     node -e "require('dotenv').config(); const jwt=require('jsonwebtoken'); \
+       console.log(jwt.sign({ sub: 'bruno-test' }, process.env.JWT_SECRET, { expiresIn: '24h' }))"
+     ```
+
+     `POST /account` itself is intentionally unauthenticated (it's the signup endpoint).
+
+  ## Suggested run order (top to bottom, folder by folder)
+
+  1. Health Check
+  2. Account → Create Sender Account, Create Recipient Account
+  3. Wallet → Open Sender USD Wallet, Open Recipient BRL Wallet
+  4. Remittance → Send Remittance (USD to BRL), then the rest
+
+  Each request's post-response script captures the ids it returns (accountId,
+  walletId, remittanceId, idempotencyKey) into collection variables, so later
+  requests in the order pick them up automatically — no manual copy-pasting.
+
+  All server-side state is **in-memory** and resets whenever the server restarts, so
+  re-run from step 2 after a restart.
+}

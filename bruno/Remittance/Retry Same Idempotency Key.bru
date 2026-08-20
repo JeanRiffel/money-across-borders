@@ -1,0 +1,48 @@
+meta {
+  name: Retry Same Idempotency Key
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 10000
+  }
+}
+
+tests {
+  test("status is 201 (cached replay, not a new debit)", function () {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("same remittanceId as the original request", function () {
+    expect(res.getBody().result.remittanceId).to.equal(bru.getVar("remittanceId"));
+  });
+}
+
+docs {
+  Deliberately does NOT regenerate `idempotencyKey` in a pre-request script —
+  it reuses whatever "Send Remittance (USD to BRL)" last set. Run this
+  immediately after that request: same key + same body should short-circuit
+  through IdempotentDecorator and return the exact same cached response
+  (same remittanceId, same timestamps), with no second debit against the
+  sender's wallet.
+}

@@ -1,0 +1,37 @@
+meta {
+  name: No Auth Token (401)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 1000
+  }
+}
+
+tests {
+  test("status is 401 (no bearer token)", function () {
+    expect(res.getStatus()).to.equal(401);
+  });
+}
+
+docs {
+  `/remittances` (like `/wallets`) sits behind authMiddleware. No
+  Authorization header at all -> 401 before the request even reaches the
+  controller. Independent of any other state.
+}

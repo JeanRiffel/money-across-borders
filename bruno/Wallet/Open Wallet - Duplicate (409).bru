@@ -1,0 +1,37 @@
+meta {
+  name: Open Wallet - Duplicate (409)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/wallets
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "accountId": "{{senderAccountId}}",
+    "currency": "USD"
+  }
+}
+
+tests {
+  test("status is 409 (WalletAlreadyExistsError)", function () {
+    expect(res.getStatus()).to.equal(409);
+  });
+}
+
+docs {
+  Error-path example. Run this *after* "Open Sender USD Wallet" — reopening a
+  USD wallet for the same account should be rejected with 409.
+}

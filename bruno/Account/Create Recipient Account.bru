@@ -1,0 +1,43 @@
+meta {
+  name: Create Recipient Account
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/account
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+script:pre-request {
+  bru.setVar("recipientEmail", "recipient+" + Date.now() + "@test.com");
+}
+
+body:json {
+  {
+    "email": "{{recipientEmail}}",
+    "password": "pass1234"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("recipientAccountId", res.getBody().result.accountId);
+  }
+}
+
+tests {
+  test("status is 201", function () {
+    expect(res.getStatus()).to.equal(201);
+  });
+}
+
+docs {
+  Same as Create Sender Account, but captures `recipientAccountId` instead —
+  this is who the remittance later gets sent to.
+}

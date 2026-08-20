@@ -1,0 +1,50 @@
+meta {
+  name: Compliance Rejected (403)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/remittances
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", "remit-compliance-" + Date.now());
+}
+
+body:json {
+  {
+    "senderAccountId": "{{senderAccountId}}",
+    "recipientAccountId": "{{recipientAccountId}}",
+    "sourceCurrency": "USD",
+    "destinationCurrency": "BRL",
+    "amountMinorUnits": 200000
+  }
+}
+
+tests {
+  test("status is 403 (ComplianceRejectedError)", function () {
+    expect(res.getStatus()).to.equal(403);
+  });
+}
+
+docs {
+  200,000 minor units is above the 100,000 unverified-sender limit
+  (InMemoryComplianceChecker), and no KycProfile is ever marked VERIFIED in
+  this MVP (no submit/verify HTTP endpoint exists yet — see CLAUDE.md), so
+  this is rejected regardless of the sender's wallet balance. Compliance is
+  checked before the balance check in SendRemittanceUseCase, so this doesn't
+  depend on run order the way "Insufficient Funds" does — it only needs
+  `senderAccountId`'s USD wallet to exist.
+}

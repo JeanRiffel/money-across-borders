@@ -1,0 +1,49 @@
+meta {
+  name: Open Sender USD Wallet
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/wallets
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwtToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "accountId": "{{senderAccountId}}",
+    "currency": "USD",
+    "initialBalanceMinorUnits": 100000
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("senderWalletId", res.getBody().result.walletId);
+  }
+}
+
+tests {
+  test("status is 201", function () {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("balance is 100000 minor units ($1,000.00)", function () {
+    expect(res.getBody().result.balanceMinorUnits).to.equal(100000);
+  });
+}
+
+docs {
+  There's no funding/deposit rail in this MVP, so `initialBalanceMinorUnits`
+  stands in for "money already in this wallet" — see CLAUDE.md.
+  Requires `senderAccountId` (run Account → Create Sender Account first) and
+  a valid `jwtToken` (see collection docs — there's no login endpoint yet).
+}

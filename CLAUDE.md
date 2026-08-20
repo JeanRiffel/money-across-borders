@@ -51,9 +51,8 @@ npm run dev:watch
 
 A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
 
-Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `DATABASE_URL`,
-`MONGO_URI`, `RABBITMQ_URL` (Postgres connection in code currently reads `POSTGRE_*` vars instead —
-see inconsistencies below).
+Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `POSTGRES_HOST`/
+`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `MONGO_URI`, `RABBITMQ_URL`.
 
 ## Architecture
 
@@ -149,9 +148,6 @@ Key patterns to follow when extending this code:
   repository are still stubs (`throw new Error("Method not implemented.")`) — Postgres/Mongo persistence
   isn't functional. `account-factory.ts`, `wallet-factory.ts`, and `remittance-factory.ts` all wire to the
   shared in-memory registry instead (see Architecture above); use the `InMemory*` implementations for tests.
-- `src/infra/config/database/postgresql/pg.ts` reads `POSTGRE_USER`/`POSTGRE_HOST`/`POSTGRE_DATABASE`/
-  `POSTGRE_PORT`/`POSTGRE_PASSWORD` env vars, but `.env.example` only defines `DATABASE_URL`. Moot for now
-  since nothing wires to Postgres, but relevant again once that adapter is implemented.
 - The Docker Compose setup described in the README (multi-node NGINX load balancing, Postgres/Redis/
   Mongo/RabbitMQ stack) is not present in the repo yet — no `docker-compose.yml`.
 - The compliance/KYC gate (`InMemoryComplianceChecker`) has no HTTP submit/verify endpoint — a
@@ -166,9 +162,12 @@ Key patterns to follow when extending this code:
 
 Previously-documented bugs that are now fixed (kept here as history in case behavior looks unfamiliar):
 the account controller's wrong import path and no-argument `execute()` call, the account router being
-built but never mounted, and `IdempotentDecorator` reading `existing.response` when
+built but never mounted, `IdempotentDecorator` reading `existing.response` when
 `InMemoryIdempotencyRepository.findByKey` actually resolves to the response value directly (silently
-returned `undefined` on every idempotency cache hit until fixed).
+returned `undefined` on every idempotency cache hit until fixed), and `pg.ts` reading `POSTGRE_*`
+(missing the S) while `.env`/`.env.example` defined `POSTGRES_*` — `pg.ts` now reads `POSTGRES_*`,
+matching `.env.example`. Still moot for the account/wallet/remittance flow, since nothing wires to this
+pool yet (see "Known inconsistencies" above).
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.

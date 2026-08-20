@@ -34,10 +34,11 @@ docs {
 
   Prerequisites (run in order):
     1. Account / Create Account (Sender)
-    2. Account / Create Account (Recipient)
-    3. Wallet / Open Wallet (Sender)   — must hold enough USD to cover
+    2. Auth / Login
+    3. Account / Create Account (Recipient)
+    4. Wallet / Open Wallet (Sender)   — must hold enough USD to cover
        amountMinorUnits + fee
-    4. Wallet / Open Wallet (Recipient) — must exist in destinationCurrency
+    5. Wallet / Open Wallet (Recipient) — must exist in destinationCurrency
 
   The Idempotency-Key header is a literal {{$guid}} — Bruno's built-in
   random-UUID runtime variable — so replaying this request manually doesn't

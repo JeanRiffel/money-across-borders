@@ -16,16 +16,19 @@ to another's via a mocked FX rate and posts through system-owned per-currency **
 currency's ledger stays balanced independently (see "Cross-currency ledger balancing" below); a basic
 **compliance/KYC** check gates how much an unverified sender can move.
 
-End-to-end and reachable over HTTP today: create an account (`POST /account`), open a wallet
-(`POST /wallets`), and send a remittance (`POST /remittances`). All persistence for this flow is
-**in-memory** (`src/infra/persistence/in-memory/in-memory-registry.ts`) and all external integrations (FX
-rates, compliance/KYC) are **mocked** — no real Postgres/Mongo/payment-rail/KYC-provider calls happen.
-There is no HTTP login/token-issuance endpoint yet (see "Known inconsistencies"), so `/wallets` and
-`/remittances`, which sit behind `authMiddleware`, need a JWT minted directly via `JWTService`/
-`jsonwebtoken` for manual testing — `/account` itself is intentionally unauthenticated (it's the signup
-endpoint). Several other files are mid-refactor or stubbed (see "Known inconsistencies" below). Don't
-assume the whole tree compiles or that every wired-up path is functional; check the specific files you're
-touching.
+End-to-end and reachable over HTTP today: create an account (`POST /account`), log in (`POST /login`),
+open a wallet (`POST /wallets`), and send a remittance (`POST /remittances`). All persistence for this
+flow is **in-memory** (`src/infra/persistence/in-memory/in-memory-registry.ts`) and all external
+integrations (FX rates, compliance/KYC) are **mocked** — no real Postgres/Mongo/payment-rail/KYC-provider
+calls happen. `POST /login` (`LoginUseCase`, behind `userRouter`) authenticates by email/password against
+`User` and returns a real JWT — `/wallets` and `/remittances`, which sit behind `authMiddleware`, take that
+token as a normal `Authorization: Bearer` header now; `/account` and `/login` are themselves
+unauthenticated (you can't have a token before you sign up or log in). `authMiddleware` only checks that
+the token is a validly-signed, unexpired JWT — it does not check that the token's `accountId` matches the
+`accountId` in the request body, so any logged-in user's token currently authorizes any account's wallet/
+remittance calls; there's no per-resource authorization layer yet. Several other files are mid-refactor or
+stubbed (see "Known inconsistencies" below). Don't assume the whole tree compiles or that every wired-up
+path is functional; check the specific files you're touching.
 
 ## Commands
 
@@ -57,8 +60,20 @@ Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, 
 ## Architecture
 
 Clean Architecture with dependency rule "dependencies point inward." Each layer lives under `src/`,
-organized **by layer first, then by bounded context** (`account`, `wallet`, `ledger`, `exchange`,
+organized **by layer first, then by bounded context** (`user`, `account`, `wallet`, `ledger`, `exchange`,
 `compliance`, `remittance`):
+
+- **`user` vs `account`**: `User` is the identity/authentication aggregate (email + password hash);
+  `Account` is the financial/ledger relationship that `Wallet`, `Remittance`, and `KycProfile` actually
+  reference by id, and deliberately carries no credentials. `Account.userId` is nullable because not
+  every account has a human owner — the system treasury account (`domain/wallet/treasury-account.ts`) is
+  an `Account` with no `User` at all. `CreateAccountUseCase` (behind `POST /account`) provisions one of
+  each per signup — it's one HTTP action, but two aggregates. `LoginUseCase` (behind `POST /login`) is the
+  other consumer: it authenticates a `User` by email/password (`PasswordHasher.compare`), resolves that
+  user's `Account` via `AccountRepository.findByUserId`, and mints a JWT embedding both ids. This split
+  used to not exist: `Account` carried a `password` field directly, which is exactly why the treasury
+  account previously needed a throwaway fake password just to satisfy the entity's constructor, and why
+  there was no login endpoint at all (fixed history in "Previously-documented bugs" below).
 
 ```
 src/
@@ -139,11 +154,6 @@ Key patterns to follow when extending this code:
   `src/infra/` and per-context subfolders like `src/domain/account/entities/...`). Its title/intro was
   updated for the cross-border pivot; the rest was not. Trust this file and the actual tree over the
   README's body.
-- **No HTTP login/token-issuance endpoint exists.** `JWTService`/`createJWTService()` and `authMiddleware`
-  work, but nothing issues a token over HTTP — `/wallets` and `/remittances` need a JWT minted directly
-  (`jwt.sign(payload, process.env.JWT_SECRET)`) for manual testing until a login endpoint is built.
-  `/account` (signup) is deliberately unauthenticated for this reason — gating account creation on auth
-  would make it unreachable for a brand-new user.
 - `src/infra/persistence/postgresql/postgres-account-repository.ts` and the Mongo-backed idempotency
   repository are still stubs (`throw new Error("Method not implemented.")`) — Postgres/Mongo persistence
   isn't functional. `account-factory.ts`, `wallet-factory.ts`, and `remittance-factory.ts` all wire to the
@@ -167,7 +177,15 @@ built but never mounted, `IdempotentDecorator` reading `existing.response` when
 returned `undefined` on every idempotency cache hit until fixed), and `pg.ts` reading `POSTGRE_*`
 (missing the S) while `.env`/`.env.example` defined `POSTGRES_*` — `pg.ts` now reads `POSTGRES_*`,
 matching `.env.example`. Still moot for the account/wallet/remittance flow, since nothing wires to this
-pool yet (see "Known inconsistencies" above).
+pool yet (see "Known inconsistencies" above). Also: `Account` used to double as the identity/auth
+aggregate (it carried a `password` field directly), which meant the system treasury account had to be
+given a throwaway fake password just to satisfy the entity — `User` is now its own domain (see the
+`user` vs `account` note in "Architecture" above), `Account.userId` is nullable, and the treasury account
+is seeded with `userId: null` / `user_id: NULL` instead. And: there used to be no HTTP login/
+token-issuance endpoint at all, so `/wallets`/`/remittances` needed a JWT minted directly via
+`jwt.sign(payload, process.env.JWT_SECRET)` for manual testing — `POST /login` (`LoginUseCase`, see
+`application/user/uses-cases/login-use-case.ts`) now does this for real, checking email/password via
+`PasswordHasher.compare` and returning a normal server-issued token.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.

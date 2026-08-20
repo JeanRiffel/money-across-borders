@@ -105,6 +105,44 @@ JWT_SECRET=your-super-secret-jwt-key-here
 
 **Important**: Use a strong, random secret in production.
 
+## Login Endpoint (POST /login)
+
+The gap this document originally flagged — "nothing issues a token over HTTP" — is closed. `POST /login`
+(`LoginUseCase`, `src/application/user/uses-cases/login-use-case.ts`) authenticates against the `User`
+aggregate (email + bcrypt password hash) and returns a normal, server-issued JWT.
+
+```
+POST /login
+Content-Type: application/json
+
+{ "email": "jane@example.com", "password": "correct-password" }
+```
+
+Response (200):
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "userId": "...",
+  "accountId": "...",
+  "email": "jane@example.com"
+}
+```
+
+Wrong password or unknown email both return `401` with a generic "Invalid email or password" message
+(`InvalidCredentialsError`) — deliberately not distinguishing the two, so the endpoint can't be used to
+enumerate registered emails.
+
+The token payload is `{ userId, accountId }`. `accountId` comes from `AccountRepository.findByUserId`,
+since the rest of the API (`/wallets`, `/remittances`) still authorizes by `accountId`, not `userId`.
+
+Note `authMiddleware` only verifies the token's signature and expiry — it does not check that the token's
+`accountId` matches the `accountId` in a request body. There's no per-resource authorization layer yet, so
+any logged-in user's token currently works for any account's wallet/remittance calls.
+
+Unlike `POST /account`, `/wallets`, and `/remittances`, `LoginUseCase` is **not** wrapped in
+`IdempotentDecorator` — see the comment in `src/main/user/user-module.ts` for why (a login is meant to
+mint a fresh token every time, not replay a cached one).
+
 ## API Authentication
 
 ### Request Format

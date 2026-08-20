@@ -60,3 +60,13 @@ export class ExchangeRateNotAvailableError extends Error {
     this.name = 'ExchangeRateNotAvailableError'
   }
 }
+
+export class InvalidCredentialsError extends Error {
+  constructor() {
+    // Deliberately generic — doesn't distinguish "unknown email" from
+    // "wrong password" so a caller can't use this endpoint to enumerate
+    // which emails are registered.
+    super('Invalid email or password')
+    this.name = 'InvalidCredentialsError'
+  }
+}

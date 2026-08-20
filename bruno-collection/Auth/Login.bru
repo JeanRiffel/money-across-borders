@@ -1,0 +1,49 @@
+meta {
+  name: Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "email": "{{senderEmail}}",
+    "password": "SuperSecret123!"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.result && res.body.result.token) {
+    bru.setEnvVar("jwt_token", res.body.result.token);
+  }
+}
+
+docs {
+  POST /login — mints a real, server-issued JWT (HS256, signed with the
+  server's JWT_SECRET, 1h expiry) for the sender account created by
+  "Account / Create Account (Sender)". Closes the gap CLAUDE.md used to
+  document ("no HTTP login/token-issuance endpoint exists") — Wallet and
+  Remittance requests no longer need to forge their own token locally.
+
+  Run "Account / Create Account (Sender)" first so `senderEmail` is
+  populated (this reuses that same email + the fixed password used to sign
+  it up). Response includes token, userId, accountId, email — the token is
+  saved to the `jwt_token` environment variable automatically.
+
+  One login is enough for the whole collection run: authMiddleware only
+  checks that the bearer token is a valid, unexpired signature — it doesn't
+  verify the token's accountId matches the accountId in the request body —
+  so this same token also works for the recipient's Open Wallet call below.
+
+  Wrong password or unknown email → 401 (InvalidCredentialsError, generic
+  message — deliberately doesn't reveal which one was wrong).
+}

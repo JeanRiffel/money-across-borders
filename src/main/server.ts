@@ -4,12 +4,15 @@ import { MongoDatabaseSingleton } from "../infra/config/database/mongo-database-
 import { accountRouter } from "../interfaces/http/routes/account/routes"
 import { walletRouter } from "../interfaces/http/routes/wallet/routes"
 import { remittanceRouter } from "../interfaces/http/routes/remittance/routes"
+import { userRouter } from "../interfaces/http/routes/user/routes"
 import { CreateAccountController } from "../interfaces/http/controllers/create-account.controller"
 import { OpenWalletController } from "../interfaces/http/controllers/open-wallet.controller"
 import { SendRemittanceController } from "../interfaces/http/controllers/send-remittance.controller"
+import { LoginController } from "../interfaces/http/controllers/login.controller"
 import { createAccountUseCase } from "src/infra/factories/account-factory"
 import { createOpenWalletUseCase } from "src/infra/factories/wallet-factory"
 import { createSendRemittanceUseCase } from "src/infra/factories/remittance-factory"
+import { createLoginUseCase } from "src/infra/factories/user-factory"
 import { createJWTService } from "../infra/factories/jwt-factory"
 dotenv.config()
 
@@ -41,6 +44,9 @@ const startServer = async () => {
 
   const accountModule = createAccountUseCase()
   app.use(accountRouter(new CreateAccountController(accountModule)))
+
+  const loginModule = createLoginUseCase(jwtService)
+  app.use(userRouter(new LoginController(loginModule)))
 
   const walletModule = createOpenWalletUseCase()
   app.use(walletRouter(new OpenWalletController(walletModule), jwtService))

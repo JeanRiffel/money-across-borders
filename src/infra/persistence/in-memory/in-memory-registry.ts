@@ -1,4 +1,5 @@
 import { InMemoryAccountRepository } from "./in-memory-account-repository"
+import { InMemoryUserRepository } from "./in-memory-user-repository"
 import { InMemoryIdempotencyRepository } from "./in-memory-idempotency-repository"
 import { InMemoryWalletRepository } from "./in-memory-wallet-repository"
 import { InMemoryLedgerRepository } from "./in-memory-ledger-repository"
@@ -18,6 +19,7 @@ import { InMemoryKycProfileRepository } from "./in-memory-kyc-profile-repository
  */
 export const inMemoryRegistry = {
   accountRepository: new InMemoryAccountRepository(),
+  userRepository: new InMemoryUserRepository(),
   walletRepository: new InMemoryWalletRepository(),
   ledgerRepository: new InMemoryLedgerRepository(),
   remittanceRepository: new InMemoryRemittanceRepository(),

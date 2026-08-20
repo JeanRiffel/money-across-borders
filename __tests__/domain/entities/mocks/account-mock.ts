@@ -9,12 +9,12 @@ export const inputData = {
 export const accountStatus = new AccountStatus(1);
 
 
-export const expectedOutput = (accountId: any) => {
+export const expectedOutput = (accountId: any, userId: any) => {
   return {
     id: accountId,
+    userId: userId,
     status: new AccountStatus(inputData.status),
     createdAt: inputData.createdAt,
-    password: '1234'
   }
 
 };

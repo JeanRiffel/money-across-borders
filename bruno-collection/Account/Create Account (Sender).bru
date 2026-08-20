@@ -41,4 +41,7 @@ docs {
   `senderAccountId` (and also in `accountId`, used by the Wallet requests
   below) so you can chain straight into "Open Wallet" and "Send Remittance"
   without copy-pasting IDs by hand.
+
+  Run Auth / Login next — it reuses the `senderEmail` runtime variable this
+  request sets, plus the same fixed password, to get a real bearer token.
 }

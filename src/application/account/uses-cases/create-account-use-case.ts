@@ -3,6 +3,10 @@ import { Account } from "../../../domain/account/entities/account"
 import { AccountRepository } from "../../../domain/account/repository/account-repository"
 import { AccountId } from "../../../domain/account/value-objects/account-id-value-object"
 import { AccountStatus } from "../../../domain/account/value-objects/account-status-value-object"
+import { User } from "../../../domain/user/entities/user"
+import { UserRepository } from "../../../domain/user/repository/user-repository"
+import { UserId } from "../../../domain/user/value-objects/user-id-value-object"
+import { UserStatus } from "../../../domain/user/value-objects/user-status-value-object"
 import { SystemClock } from "../../../infra/time/system-clock"
 import { CreateAccountOutput } from "../dto/create-account-output"
 import { CreateAccountInput } from "../dto/create-account-input"
@@ -13,25 +17,37 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
 
   constructor(
     private readonly accountRepository: AccountRepository,
+    private readonly userRepository: UserRepository,
     private readonly passwordHasher: PasswordHasher
   ){}
 
   async execute(input: CreateAccountInput): Promise<CreateAccountOutput>{
     const hashedPassword = await this.passwordHasher.hash(input.password)
-    
-    const accountId =  AccountId.generate()
-    const accountStatus = new AccountStatus(1)
     const createdAt = new SystemClock().now()
 
-    const account = new Account(
-      accountId,
-      accountStatus,
-      createdAt,
-      hashedPassword
+    // Signup is one action from the caller's point of view (POST /account),
+    // but provisions two separate aggregates: a User for identity/login,
+    // and an Account for the financial relationship that Wallet/Remittance/
+    // KycProfile reference. See domain/user/entities/user.ts and
+    // domain/account/entities/account.ts for why they're split.
+    const user = new User(
+      UserId.generate(),
+      input.email,
+      hashedPassword,
+      UserStatus.active(),
+      createdAt
     )
-    
-    await this.accountRepository.save(account);
-    return CreateAccountOutput.from(account)
+    await this.userRepository.save(user)
+
+    const account = new Account(
+      AccountId.generate(),
+      user.getId(),
+      new AccountStatus(1),
+      createdAt
+    )
+    await this.accountRepository.save(account)
+
+    return CreateAccountOutput.from(account, user)
   }
 
 }

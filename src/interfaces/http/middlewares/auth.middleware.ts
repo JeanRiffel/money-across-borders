@@ -14,7 +14,7 @@ export function authMiddleware(tokenVerifier: TokenVerifier): (req: Authenticate
     try {
       const payload = tokenVerifier.verify(token)
       req.user = payload
-      next()
+      return next()
     } catch {
       return res.status(401).send()
     }

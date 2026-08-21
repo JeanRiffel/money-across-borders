@@ -5,17 +5,17 @@ import { InMemoryWalletRepository } from "./in-memory-wallet-repository"
 import { InMemoryLedgerRepository } from "./in-memory-ledger-repository"
 import { InMemoryRemittanceRepository } from "./in-memory-remittance-repository"
 import { InMemoryKycProfileRepository } from "./in-memory-kyc-profile-repository"
+import { InMemoryUnitOfWork } from "./in-memory-unit-of-work"
 
 /**
- * A single shared instance of every in-memory repository, imported by every
- * *-factory.ts in this module. This deliberately deviates from the existing
- * per-factory `new PostgresXRepository()` pattern: that pattern is fine for
- * Postgres (one external, shared database), but fatal for in-memory mode — if
- * account-factory.ts, wallet-factory.ts and remittance-factory.ts each `new`
- * their own in-memory repos, an account created via one factory would be
- * invisible to another and the whole demo flow would break. This module is
- * the fix: one process-wide registry, so state is consistent across every
- * request regardless of which factory built the use case handling it.
+ * A single shared instance of every in-memory repository. Historically this
+ * was what every *-factory.ts imported (before Postgres was wired up — see
+ * postgres-registry.ts, which factories use now); state is consistent across
+ * every request regardless of which factory built the use case handling it.
+ * Nothing under src/ imports this anymore, but it's kept — and kept in sync
+ * with postgres-registry.ts's shape — as the in-memory stack's one obvious
+ * entry point for tests or scripts that want it, the same way use-case tests
+ * already construct individual InMemory*Repository instances directly.
  */
 export const inMemoryRegistry = {
   accountRepository: new InMemoryAccountRepository(),
@@ -25,4 +25,5 @@ export const inMemoryRegistry = {
   remittanceRepository: new InMemoryRemittanceRepository(),
   kycProfileRepository: new InMemoryKycProfileRepository(),
   idempotencyRepository: new InMemoryIdempotencyRepository(),
+  unitOfWork: new InMemoryUnitOfWork(),
 }

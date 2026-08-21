@@ -15,6 +15,7 @@ import { ExchangeRateProvider } from "../../shared/exchange/exchange-rate-provid
 import { ComplianceChecker } from "../../shared/compliance/compliance-checker"
 import { FeeCalculator } from "../../shared/pricing/fee-calculator"
 import { Clock } from "../../../domain/shared/clock"
+import { UnitOfWork } from "../../shared/transaction/unit-of-work"
 import {
   WalletNotFoundError,
   RecipientWalletNotFoundError,
@@ -32,10 +33,20 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
     private readonly exchangeRateProvider: ExchangeRateProvider,
     private readonly complianceChecker: ComplianceChecker,
     private readonly feeCalculator: FeeCalculator,
-    private readonly clock: Clock
+    private readonly clock: Clock,
+    private readonly unitOfWork: UnitOfWork
   ) {}
 
+  // Wrapped in a single DB transaction (see UnitOfWork): a failure anywhere
+  // in here — after some but not all of the wallet/ledger/remittance saves
+  // below have run — rolls back everything instead of leaving a partially
+  // posted remittance. The in-memory implementation is a no-op passthrough,
+  // so this changes nothing about how tests exercise this use case.
   async execute(input: SendRemittanceInput): Promise<SendRemittanceOutput> {
+    return this.unitOfWork.runInTransaction(() => this.doExecute(input))
+  }
+
+  private async doExecute(input: SendRemittanceInput): Promise<SendRemittanceOutput> {
     const senderAccountId = AccountId.from(input.senderAccountId)
     const recipientAccountId = AccountId.from(input.recipientAccountId)
     const sourceCurrency = Currency.from(input.sourceCurrency)

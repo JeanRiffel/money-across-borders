@@ -6,6 +6,7 @@ import { InMemoryWalletRepository } from '../../../../src/infra/persistence/in-m
 import { InMemoryLedgerRepository } from '../../../../src/infra/persistence/in-memory/in-memory-ledger-repository'
 import { InMemoryRemittanceRepository } from '../../../../src/infra/persistence/in-memory/in-memory-remittance-repository'
 import { InMemoryKycProfileRepository } from '../../../../src/infra/persistence/in-memory/in-memory-kyc-profile-repository'
+import { InMemoryUnitOfWork } from '../../../../src/infra/persistence/in-memory/in-memory-unit-of-work'
 import { seedTreasuryWallets } from '../../../../src/infra/persistence/in-memory/seed-treasury-wallets'
 import { MockExchangeRateProvider } from '../../../../src/infra/exchange/mock-exchange-rate-provider'
 import { InMemoryComplianceChecker } from '../../../../src/infra/compliance/in-memory-compliance-checker'
@@ -36,7 +37,8 @@ function buildScenario() {
     new MockExchangeRateProvider(),
     new InMemoryComplianceChecker(kycProfileRepository),
     new FlatPercentageFeeCalculator(),
-    clock
+    clock,
+    new InMemoryUnitOfWork()
   )
 
   const openWallet = new OpenWalletUseCase(walletRepository, clock)

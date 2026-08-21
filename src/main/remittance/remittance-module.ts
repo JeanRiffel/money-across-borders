@@ -11,6 +11,7 @@ import { ExchangeRateProvider } from "src/application/shared/exchange/exchange-r
 import { ComplianceChecker } from "src/application/shared/compliance/compliance-checker"
 import { FeeCalculator } from "src/application/shared/pricing/fee-calculator"
 import { IdempotencyRepository } from "src/application/repositories/idempotency-repository"
+import { UnitOfWork } from "src/application/shared/transaction/unit-of-work"
 import { Clock } from "src/domain/shared/clock"
 
 export type RemittanceModuleDependencies = {
@@ -22,6 +23,7 @@ export type RemittanceModuleDependencies = {
   feeCalculator: FeeCalculator
   idempotencyRepository: IdempotencyRepository
   clock: Clock
+  unitOfWork: UnitOfWork
 }
 
 export function buildRemittanceModule(
@@ -40,7 +42,8 @@ export function buildRemittanceModule(
       deps.exchangeRateProvider,
       deps.complianceChecker,
       deps.feeCalculator,
-      deps.clock
+      deps.clock,
+      deps.unitOfWork
     )
 
   const idempotentSendRemittance =

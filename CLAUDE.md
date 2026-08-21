@@ -17,10 +17,14 @@ currency's ledger stays balanced independently (see "Cross-currency ledger balan
 **compliance/KYC** check gates how much an unverified sender can move.
 
 End-to-end and reachable over HTTP today: create an account (`POST /account`), log in (`POST /login`),
-open a wallet (`POST /wallets`), and send a remittance (`POST /remittances`). All persistence for this
-flow is **in-memory** (`src/infra/persistence/in-memory/in-memory-registry.ts`) and all external
-integrations (FX rates, compliance/KYC) are **mocked** — no real Postgres/Mongo/payment-rail/KYC-provider
-calls happen. `POST /login` (`LoginUseCase`, behind `userRouter`) authenticates by email/password against
+open a wallet (`POST /wallets`), and send a remittance (`POST /remittances`). This flow is
+**Postgres-backed** (`src/infra/persistence/postgresql/postgres-registry.ts`, wired into every
+`*-factory.ts`) — the app requires a reachable, migrated Postgres to boot at all (`server.ts` fails fast,
+`process.exit(1)`, if the connection check fails). `npm test`'s use-case tests still run entirely against
+the **in-memory** repos (`src/infra/persistence/in-memory/`), constructed directly, bypassing the
+factory/Postgres layer completely — see "Wiring order" below. All other external integrations (FX rates,
+compliance/KYC) stay **mocked** — no real payment-rail/KYC-provider calls happen. `POST /login`
+(`LoginUseCase`, behind `userRouter`) authenticates by email/password against
 `User` and returns a real JWT — `/wallets` and `/remittances`, which sit behind `authMiddleware`, take that
 token as a normal `Authorization: Bearer` header now; `/account` and `/login` are themselves
 unauthenticated (you can't have a token before you sign up or log in). `authMiddleware` only checks that
@@ -48,14 +52,19 @@ npm run format           # prettier --write src/**/*.ts
 npm run format:check
 
 npm start                # nodemon --exec bun run src/main/server.ts
-npm run dev               # ts-node --esm src/main/server.ts
+npm run dev               # ts-node src/main/server.ts
 npm run dev:watch
+
+npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql
 ```
 
 A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
 
 Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `POSTGRES_HOST`/
 `POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `MONGO_URI`, `RABBITMQ_URL`.
+Postgres must be reachable and migrated before `npm run dev`/`npm start` — run `npm run db:migrate` once
+(idempotent, safe to re-run) against a fresh database first; the server exits immediately if it can't
+connect (see "What this is" above). `npm test` needs none of this — it never touches Postgres.
 
 ## Architecture
 
@@ -82,17 +91,20 @@ src/
  │    └── shared/              cross-context domain: Clock, errors.ts, Money/Currency value objects
  ├── application/<context>/    use cases + DTOs, orchestrate domain objects
  │    ├── repositories/        ports the application layer depends on (e.g. IdempotencyRepository)
- │    └── shared/              cross-cutting ports: authentication, idempotency, security, exchange, compliance, pricing
+ │    └── shared/              cross-cutting ports: authentication, idempotency, security, exchange, compliance,
+ │                              pricing, transaction (UnitOfWork)
  ├── infra/                    concrete adapters implementing domain/application ports
  │    ├── authentication/      JWTService (implements TokenGenerator + TokenVerifier)
- │    ├── config/database/     Postgres pool, Mongo singleton, Redis client (Strategy pattern via DatabaseStrategy/DatabaseContext)
+ │    ├── config/database/     Postgres pool (+ transaction context, see below), Mongo singleton, Redis client
+ │    │                        (Strategy pattern via DatabaseStrategy/DatabaseContext — Mongo only, see below)
  │    ├── config/message-broker/ RabbitMQ connection/producer/consumer
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
  │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
  │    ├── pricing/             FlatPercentageFeeCalculator — mocked
  │    ├── factories/           wire concrete adapters into a use case (e.g. account-factory.ts, remittance-factory.ts)
- │    ├── persistence/         postgresql/ (stubs, non-functional), in-memory/ (the actually-used repos + the
- │    │                        shared in-memory-registry.ts singleton — see below)
+ │    ├── persistence/         postgresql/ (the repos every factory wires to, plus postgres-registry.ts,
+ │    │                        postgres-unit-of-work.ts, and migrations/), in-memory/ (what tests construct
+ │    │                        directly instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
  │    ├── security/            BcryptPasswordHasher
  │    └── time/                SystemClock
  ├── interfaces/http/          Express-facing layer: controllers, routes, middlewares
@@ -126,11 +138,25 @@ Key patterns to follow when extending this code:
 - **Wiring order**: domain port → application use case (depends on port interfaces only) → infra adapter
   (implements the port) → factory in `infra/factories/` (constructs adapters + calls a `main/.../*-module.ts`
   builder) → `main/server.ts` (calls the factory, injects into a controller/router).
-- **In-memory repositories share one process-wide instance** via `infra/persistence/in-memory/
-  in-memory-registry.ts`, imported by every `*-factory.ts`. This is a deliberate deviation from
-  each factory `new`-ing its own repository (fine for Postgres — one external, shared database — but
-  fatal for in-memory mode, where separately-`new`'d repos per factory would make state invisible across
-  contexts, e.g. an account created via `account-factory.ts` unreachable from `wallet-factory.ts`).
+- **Every `*-factory.ts` wires to `infra/persistence/postgresql/postgres-registry.ts`** — one shared
+  instance of each `Postgres*Repository` (each takes no constructor args; they call a shared
+  `getExecutor()` helper from `config/database/postgresql/pg.ts` per query instead of holding injected
+  state). `infra/persistence/in-memory/in-memory-registry.ts` is the parallel in-memory equivalent, kept in
+  sync in shape but **not imported by any factory or test** — every use-case test constructs its own
+  `InMemory*Repository` instances directly (see "Tests mirror..." below), so the in-memory registry itself
+  is currently unused scaffolding, kept only as the in-memory stack's one obvious entry point.
+- **`UnitOfWork`** (`application/shared/transaction/unit-of-work.ts`) wraps a sequence of repository writes
+  in one atomic unit. `SendRemittanceUseCase` is the one consumer today — its whole `execute()` body runs
+  inside `unitOfWork.runInTransaction(...)`, so a failure partway through (after some but not all of its
+  wallet/ledger/remittance saves) rolls back everything instead of leaving a partial posting.
+  `PostgresUnitOfWork` (`infra/persistence/postgresql/postgres-unit-of-work.ts`) does a real
+  `BEGIN`/`COMMIT`/`ROLLBACK`, publishing the transaction's `PoolClient` via an `AsyncLocalStorage`
+  (`transactionContext` in `pg.ts`) so every `Postgres*Repository` call made during the callback picks it
+  up transparently through `getExecutor()` — no `client` parameter threaded through repository method
+  signatures. `InMemoryUnitOfWork` is a no-op passthrough (`return work()`), which is why this changed
+  nothing about how tests exercise `SendRemittanceUseCase`. Not implemented: `SELECT ... FOR UPDATE` row
+  locking on the wallet reads inside the transaction — atomicity (all-or-nothing) is guaranteed, but not
+  concurrent-debit race safety, which would need it.
 - **Cross-currency ledger balancing**: a single transaction can't balance directly across two currencies.
   System-owned **treasury wallets** (one per supported currency, owned by the reserved
   `TREASURY_ACCOUNT_ID` in `domain/wallet/treasury-account.ts`, seeded via `seed-treasury-wallets.ts`) act
@@ -139,10 +165,17 @@ Key patterns to follow when extending this code:
   invariant before persisting. See `SendRemittanceUseCase` for the exact leg layout (principal + fee legs
   in the source currency, settlement legs in the destination currency; a same-currency shortcut skips
   treasury for the principal and routes only the fee through it).
-- Database access uses a **Strategy pattern**: `DatabaseStrategy<T>` interface (`connect`/`disconnect`)
-  with `DatabaseContext` as the strategy holder; see `mongo-database-sigleton.ts` for the Mongo singleton
-  usage (filename typo is existing, not yet renamed). Mongo connection failure at startup is logged, not
-  fatal — nothing in the account/wallet/remittance flow touches it.
+- Mongo access uses a **Strategy pattern**: `DatabaseStrategy<T>` interface (`connect`/`disconnect`) with
+  `DatabaseContext` as the (currently unused) strategy holder; see `mongo-database-sigleton.ts` for the
+  actual Mongo singleton usage (filename typo is existing, not yet renamed) — it calls `MongoDatabase
+  .connect()` directly, not through `DatabaseContext`. Mongo connection failure at startup is logged, not
+  fatal — nothing in the account/wallet/remittance flow touches it. Postgres deliberately does **not**
+  follow this pattern: `pg.ts` exports a bare `pool` (`pg.Pool` already manages its own connection
+  lifecycle) plus a `getExecutor()` helper for transaction-awareness (see the `UnitOfWork` bullet above) —
+  no `PostgresDatabase implements DatabaseStrategy<Pool>` wrapper exists, since nothing needed the
+  connect/disconnect abstraction Mongo's version provides. `server.ts` fails fast if Postgres isn't
+  reachable at boot (`pool.query('SELECT 1')`, `process.exit(1)` on failure) and closes the pool on
+  `SIGTERM`/`SIGINT` — the first graceful-shutdown hooks in this codebase.
 - Tests mirror `src/`'s path structure under `__tests__/` (e.g. `src/domain/account/entities/account.ts` →
   `__tests__/domain/entities/account.test.ts`) and prefer `InMemory*` repository fakes over mocking
   frameworks for use-case tests.
@@ -154,21 +187,25 @@ Key patterns to follow when extending this code:
   `src/infra/` and per-context subfolders like `src/domain/account/entities/...`). Its title/intro was
   updated for the cross-border pivot; the rest was not. Trust this file and the actual tree over the
   README's body.
-- `src/infra/persistence/postgresql/postgres-account-repository.ts` and the Mongo-backed idempotency
-  repository are still stubs (`throw new Error("Method not implemented.")`) — Postgres/Mongo persistence
-  isn't functional. `account-factory.ts`, `wallet-factory.ts`, and `remittance-factory.ts` all wire to the
-  shared in-memory registry instead (see Architecture above); use the `InMemory*` implementations for tests.
+- Postgres persistence is functional (`account-factory.ts`, `wallet-factory.ts`, `remittance-factory.ts`,
+  `user-factory.ts` all wire to `postgres-registry.ts` — see Architecture above); Mongo persistence is
+  still not — nothing in this slice touches it beyond the non-fatal connect-and-log at boot. `npm test`
+  uses the `InMemory*` implementations directly, never Postgres.
 - The Docker Compose setup described in the README (multi-node NGINX load balancing, Postgres/Redis/
-  Mongo/RabbitMQ stack) is not present in the repo yet — no `docker-compose.yml`.
-- The compliance/KYC gate (`InMemoryComplianceChecker`) has no HTTP submit/verify endpoint — a
+  Mongo/RabbitMQ stack) is not present in the repo yet — no `docker-compose.yml`. Postgres today is
+  whatever `POSTGRES_HOST`/etc. in `.env` point at, started/managed outside this repo.
+- The compliance/KYC gate (`InMemoryComplianceChecker` — the name is legacy, it's a mocked business-rule
+  checker, not an in-memory *store*; it takes whatever `KycProfileRepository` it's constructed with, and is
+  wired to the Postgres one via `remittance-factory.ts`) has no HTTP submit/verify endpoint — a
   `KycProfile` can only be marked `VERIFIED` by saving one directly through `KycProfileRepository` (tests
   or an ad-hoc script), not through the API. Below the fixed unverified-sender threshold, remittances work
   without one.
 - FX rates (`MockExchangeRateProvider`) are a static table, not a live feed; the compliance threshold is
-  applied in raw source-currency minor units, not FX-normalized; treasury wallets are seeded once with a
-  large fixed balance rather than continuously rebalanced; and there's no unit-of-work/rollback across the
-  several `save()` calls in `SendRemittanceUseCase` — all documented, deliberate simplifications for this
-  showcase, not oversights.
+  applied in raw source-currency minor units, not FX-normalized; and treasury wallets are seeded once with
+  a large fixed balance (`migrations/002_seed_treasury_wallets.sql`) rather than continuously rebalanced —
+  documented, deliberate simplifications for this showcase, not oversights. (`SendRemittanceUseCase`'s
+  writes *are* now wrapped in a real transaction — see the `UnitOfWork` bullet in Architecture above; that
+  used to be on this list as a known gap and no longer is.)
 
 Previously-documented bugs that are now fixed (kept here as history in case behavior looks unfamiliar):
 the account controller's wrong import path and no-argument `execute()` call, the account router being
@@ -176,8 +213,8 @@ built but never mounted, `IdempotentDecorator` reading `existing.response` when
 `InMemoryIdempotencyRepository.findByKey` actually resolves to the response value directly (silently
 returned `undefined` on every idempotency cache hit until fixed), and `pg.ts` reading `POSTGRE_*`
 (missing the S) while `.env`/`.env.example` defined `POSTGRES_*` — `pg.ts` now reads `POSTGRES_*`,
-matching `.env.example`. Still moot for the account/wallet/remittance flow, since nothing wires to this
-pool yet (see "Known inconsistencies" above). Also: `Account` used to double as the identity/auth
+matching `.env.example`. (At the time this was fixed, nothing wired to `pool` yet either way — now
+everything does, see below.) Also: `Account` used to double as the identity/auth
 aggregate (it carried a `password` field directly), which meant the system treasury account had to be
 given a throwaway fake password just to satisfy the entity — `User` is now its own domain (see the
 `user` vs `account` note in "Architecture" above), `Account.userId` is nullable, and the treasury account
@@ -185,7 +222,10 @@ is seeded with `userId: null` / `user_id: NULL` instead. And: there used to be n
 token-issuance endpoint at all, so `/wallets`/`/remittances` needed a JWT minted directly via
 `jwt.sign(payload, process.env.JWT_SECRET)` for manual testing — `POST /login` (`LoginUseCase`, see
 `application/user/uses-cases/login-use-case.ts`) now does this for real, checking email/password via
-`PasswordHasher.compare` and returning a normal server-issued token.
+`PasswordHasher.compare` and returning a normal server-issued token. Also: every `Postgres*Repository`
+used to be a stub and every `*-factory.ts` wired to the in-memory registry regardless — the app now
+requires and uses real Postgres (see "What this is" and the Architecture bullets above); only `npm test`
+still runs against the in-memory repos.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.

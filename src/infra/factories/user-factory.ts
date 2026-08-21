@@ -4,7 +4,7 @@ import { LoginInput } from "src/application/user/dto/login-input";
 import { LoginOutput } from "src/application/user/dto/login-output";
 import { TokenGenerator } from "src/application/shared/authentication/token-authentication";
 import { BcryptPasswordHasher } from "../security/bycrypt-password-hasher";
-import { inMemoryRegistry } from "../persistence/in-memory/in-memory-registry";
+import { postgresRegistry } from "../persistence/postgresql/postgres-registry";
 
 // Takes the already-constructed JWTService (server.ts's single instance,
 // also used as the TokenVerifier for authMiddleware) rather than building
@@ -12,8 +12,8 @@ import { inMemoryRegistry } from "../persistence/in-memory/in-memory-registry";
 // role for tokens minted here to actually pass authMiddleware later.
 export function createLoginUseCase(tokenGenerator: TokenGenerator): UseCase<LoginInput, LoginOutput> {
   const dependencies = {
-    userRepository: inMemoryRegistry.userRepository,
-    accountRepository: inMemoryRegistry.accountRepository,
+    userRepository: postgresRegistry.userRepository,
+    accountRepository: postgresRegistry.accountRepository,
     passwordHasher: new BcryptPasswordHasher(),
     tokenGenerator
   }

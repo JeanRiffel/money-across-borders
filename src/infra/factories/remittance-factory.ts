@@ -3,30 +3,28 @@ import { UseCase } from "src/application/shared/idempotency/common-use-case.";
 import { SendRemittanceInput } from "src/application/remittance/dto/send-remittance-input";
 import { SendRemittanceOutput } from "src/application/remittance/dto/send-remittance-output";
 import { SystemClock } from "../time/system-clock";
-import { inMemoryRegistry } from "../persistence/in-memory/in-memory-registry";
-import { seedTreasuryWallets } from "../persistence/in-memory/seed-treasury-wallets";
+import { postgresRegistry } from "../persistence/postgresql/postgres-registry";
 import { MockExchangeRateProvider } from "../exchange/mock-exchange-rate-provider";
 import { InMemoryComplianceChecker } from "../compliance/in-memory-compliance-checker";
 import { FlatPercentageFeeCalculator } from "../pricing/flat-percentage-fee-calculator";
 
+// No seedTreasuryWallets() call here (unlike the old in-memory-backed
+// version of this factory): the treasury account + its per-currency wallets
+// are seeded by migration 002_seed_treasury_wallets.sql instead, idempotently,
+// as part of `npm run db:migrate` — see CLAUDE.md's Commands section.
 export async function createSendRemittanceUseCase(): Promise<UseCase<SendRemittanceInput, SendRemittanceOutput>> {
   const clock = new SystemClock()
 
-  // Treasury wallets must exist before any remittance can be posted against
-  // them; seeding is idempotent (skips currencies already seeded), so it's
-  // safe to call every time this factory runs. Awaited so the use case is
-  // never handed out before the wallets it depends on actually exist.
-  await seedTreasuryWallets(inMemoryRegistry.walletRepository, clock)
-
   const dependencies = {
-    walletRepository: inMemoryRegistry.walletRepository,
-    ledgerRepository: inMemoryRegistry.ledgerRepository,
-    remittanceRepository: inMemoryRegistry.remittanceRepository,
+    walletRepository: postgresRegistry.walletRepository,
+    ledgerRepository: postgresRegistry.ledgerRepository,
+    remittanceRepository: postgresRegistry.remittanceRepository,
     exchangeRateProvider: new MockExchangeRateProvider(),
-    complianceChecker: new InMemoryComplianceChecker(inMemoryRegistry.kycProfileRepository),
+    complianceChecker: new InMemoryComplianceChecker(postgresRegistry.kycProfileRepository),
     feeCalculator: new FlatPercentageFeeCalculator(),
-    idempotencyRepository: inMemoryRegistry.idempotencyRepository,
-    clock
+    idempotencyRepository: postgresRegistry.idempotencyRepository,
+    clock,
+    unitOfWork: postgresRegistry.unitOfWork
   }
 
   return buildRemittanceModule(dependencies)

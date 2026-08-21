@@ -14,6 +14,7 @@ import { createOpenWalletUseCase } from "src/infra/factories/wallet-factory"
 import { createSendRemittanceUseCase } from "src/infra/factories/remittance-factory"
 import { createLoginUseCase } from "src/infra/factories/user-factory"
 import { createJWTService } from "../infra/factories/jwt-factory"
+import { pool } from "../infra/config/database/postgresql/pg"
 dotenv.config()
 
 const app = express()
@@ -40,6 +41,18 @@ const startServer = async () => {
     console.warn('⚠ MongoDB unavailable, continuing without it (not used by this slice):', error)
   }
 
+  // Unlike Mongo above, Postgres IS the source of truth for the
+  // account/wallet/remittance flow now (see infra/persistence/postgresql) —
+  // a failed connection here is fatal. Run `npm run db:migrate` first
+  // against a fresh database (see CLAUDE.md).
+  try {
+    await pool.query('SELECT 1')
+    console.log('✓ Postgres connection established')
+  } catch (error) {
+    console.error('✗ Postgres unavailable, cannot start:', error)
+    process.exit(1)
+  }
+
   const jwtService = createJWTService()
 
   const accountModule = createAccountUseCase()
@@ -58,5 +71,16 @@ const startServer = async () => {
     console.log(`✓ Server is running on port ${port}`)
   })
 }
+
+// First shutdown hooks in this codebase — nothing closed the Postgres pool
+// on exit before now (it also didn't need to, being unused). Mongo's client
+// is left as-is here: still non-fatal/unused by this slice, out of scope.
+const shutdown = async (signal: string): Promise<void> => {
+  console.log(`\n${signal} received, closing Postgres pool...`)
+  await pool.end()
+  process.exit(0)
+}
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
+process.on('SIGINT', () => void shutdown('SIGINT'))
 
 startServer()

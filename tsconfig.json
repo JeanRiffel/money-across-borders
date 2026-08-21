@@ -24,9 +24,12 @@
     "strictBindCallApply": true,
     "strictPropertyInitialization": true,
     "noImplicitThis": true,
-    "alwaysStrict": true
+    "alwaysStrict": true,
+    "paths": { "src/*": ["src/*"] }
+  },
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
   },
   "include": ["src/**/*", "__tests__"],
-  "exclude": ["node_modules", "dist"],
-  "paths": { "src/*": ["src/*"] },
+  "exclude": ["node_modules", "dist"]
 }

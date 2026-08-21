@@ -33,9 +33,17 @@ script:post-response {
 }
 
 docs {
-  Signup endpoint. Deliberately unauthenticated (no login/token-issuance
-  endpoint exists yet, so a brand-new user needs a way in before it can
-  hold a bearer token).
+  Signup endpoint. Deliberately unauthenticated — a brand-new caller has no
+  bearer token yet, so it can't sit behind authMiddleware like Wallet and
+  Remittance do.
+
+  Provisions two aggregates from one call: a User (identity/credentials —
+  email + hashed password) and an Account (the financial/ledger
+  relationship Wallet/Remittance/KycProfile reference by id). The response
+  is Account-shaped (accountId, email, status, createdAt) — it does not
+  return userId; if you need that id, read it from Auth / Login's response
+  instead, which resolves the User behind the email/password and returns
+  both userId and accountId.
 
   On success, stores the returned accountId in the environment variable
   `senderAccountId` (and also in `accountId`, used by the Wallet requests
@@ -43,5 +51,6 @@ docs {
   without copy-pasting IDs by hand.
 
   Run Auth / Login next — it reuses the `senderEmail` runtime variable this
-  request sets, plus the same fixed password, to get a real bearer token.
+  request sets, plus the same fixed password, to mint a real bearer token
+  (POST /login, backed by the User domain — see domain/user/entities/user.ts).
 }

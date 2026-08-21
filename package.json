@@ -3,6 +3,7 @@
   "module": "index.ts",
   "private": true,
   "devDependencies": {
+    "@cucumber/cucumber": "^13.2.1",
     "@types/bcrypt": "^6.0.0",
     "@types/bun": "latest",
     "@types/express": "^5.0.5",
@@ -43,6 +44,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:integration": "cucumber-js",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",

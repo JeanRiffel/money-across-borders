@@ -46,6 +46,8 @@ npm test -- <pattern>    # run a subset, e.g. npm test -- create-account
 npm run test:watch
 npm run test:coverage
 
+npm run test:integration  # Cucumber (see "Integration tests" below) — needs a reachable, migrated Postgres
+
 npm run lint             # eslint src --ext .ts
 npm run lint:fix
 npm run format           # prettier --write src/**/*.ts
@@ -179,6 +181,16 @@ Key patterns to follow when extending this code:
 - Tests mirror `src/`'s path structure under `__tests__/` (e.g. `src/domain/account/entities/account.ts` →
   `__tests__/domain/entities/account.test.ts`) and prefer `InMemory*` repository fakes over mocking
   frameworks for use-case tests.
+- **Integration tests** live under `features/` and run on Cucumber (`cucumber.js`, `npm run test:integration`),
+  separate from Jest's unit suite. They exercise the real Express app end to end over HTTP against a real
+  Postgres — no in-memory repos, no mocking. `src/main/server.ts` exports `buildApp()` (Express wiring minus
+  `app.listen`) specifically so `features/support/hooks.ts` can build the same app the CLI entrypoint does,
+  bind it to an ephemeral port once per suite run (`BeforeAll`/`AfterAll`), and tear it down cleanly —
+  `startServer()` itself is now guarded behind `require.main === module` so importing `buildApp` doesn't
+  also boot a second server on the fixed `PORT`. Because this suite writes to a real, non-rolled-back
+  database, step definitions generate a unique email per scenario (`accounts`/`users` has a `UNIQUE`
+  constraint on email) rather than reusing a fixed fixture. Needs `npm run db:migrate` run first, same as
+  `npm run dev`/`npm start`; unlike `npm test`, this suite does touch Postgres for real.
 
 ## Known inconsistencies (check before relying on these paths)
 

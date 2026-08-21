@@ -1,12 +1,13 @@
 import { ProductFactory } from '../../../domain/transaction/factories/product-factory';
 import { PGTransactionRepostory } from '../../repositories/PGTransactionRepository';
 import { connectRabbitMQ } from './rabbitmq-connection';
+import { logger } from '../../observability/logger';
 
 export const consumeMessages = async (queue: string) => {
     const { channel } = await connectRabbitMQ();
     await channel.assertQueue(queue, { durable: true });
-    
-    console.log(`Waiting for messages in ${queue}...`);
+
+    logger.info(`Waiting for messages in ${queue}...`);
 
     channel.consume(queue, async (message) => {
       if (!message) return 

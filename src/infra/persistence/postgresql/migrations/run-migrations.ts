@@ -6,6 +6,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { pool } from "../../../config/database/postgresql/pg"
+import { logger } from "../../../observability/logger"
 
 const MIGRATIONS_DIR = __dirname
 
@@ -16,15 +17,15 @@ async function run(): Promise<void> {
 
   for (const file of files) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8")
-    console.log(`Applying ${file}...`)
+    logger.info(`Applying ${file}...`)
     await pool.query(sql)
   }
 
-  console.log(`✓ Applied ${files.length} migration(s)`)
+  logger.info(`✓ Applied ${files.length} migration(s)`)
   await pool.end()
 }
 
 run().catch((error) => {
-  console.error("✗ Migration failed:", error)
+  logger.error({ error }, "✗ Migration failed")
   process.exit(1)
 })

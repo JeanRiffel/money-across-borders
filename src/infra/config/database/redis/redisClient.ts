@@ -1,13 +1,14 @@
 import { createClient } from "redis";
+import { logger } from "../../../observability/logger";
 
 const redisClient = createClient({
   url: process.env.REDIS_HOST,
 });
 
-redisClient.on("error", (err) => console.error("Redis Client Error", err));
+redisClient.on("error", (err) => logger.error({ err }, "Redis Client Error"));
 
 await redisClient.connect();
 
-console.log("✅ Connected to Redis");
+logger.info("✅ Connected to Redis");
 
 export default redisClient;

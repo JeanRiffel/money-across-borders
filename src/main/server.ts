@@ -1,5 +1,10 @@
+// Must be the first import in the process — see tracing.ts for why.
+import "../infra/observability/tracing"
 import express, { Express, Request, Response } from "express"
+import pinoHttp from "pino-http"
 import dotenv from 'dotenv'
+import { logger } from "../infra/observability/logger"
+import { httpMetricsMiddleware, register } from "../infra/observability/metrics"
 import { MongoDatabaseSingleton } from "../infra/config/database/mongo-database-sigleton"
 import { accountRouter } from "../interfaces/http/routes/account/routes"
 import { walletRouter } from "../interfaces/http/routes/wallet/routes"
@@ -26,9 +31,17 @@ dotenv.config()
 export const buildApp = async (): Promise<Express> => {
   const app = express()
   app.use(express.json())
+  app.use(pinoHttp({ logger }))
+  app.use(httpMetricsMiddleware)
 
   app.get('/health', (_req: Request, res: Response) => {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  })
+
+  // Unauthenticated, like /health above — the Prometheus scraper has no JWT.
+  app.get('/metrics', async (_req: Request, res: Response) => {
+    res.set('Content-Type', register.contentType)
+    return res.send(await register.metrics())
   })
 
   // None of this slice's routes (account/wallet/remittance) touch Mongo —
@@ -36,9 +49,9 @@ export const buildApp = async (): Promise<Express> => {
   // Mongo instance is logged, not fatal.
   try {
     await MongoDatabaseSingleton.getInstance()
-    console.log('✓ Database connection established')
+    logger.info('✓ Database connection established')
   } catch (error) {
-    console.warn('⚠ MongoDB unavailable, continuing without it (not used by this slice):', error)
+    logger.warn({ error }, '⚠ MongoDB unavailable, continuing without it (not used by this slice)')
   }
 
   // Unlike Mongo above, Postgres IS the source of truth for the
@@ -49,7 +62,7 @@ export const buildApp = async (): Promise<Express> => {
   // decide how to react to an unreachable database.
   try {
     await pool.query('SELECT 1')
-    console.log('✓ Postgres connection established')
+    logger.info('✓ Postgres connection established')
   } catch (error) {
     throw new Error(`Postgres unavailable, cannot start: ${error}`)
   }
@@ -79,12 +92,12 @@ const startServer = async () => {
   try {
     app = await buildApp()
   } catch (error) {
-    console.error(`✗ ${error}`)
+    logger.error(`✗ ${error}`)
     process.exit(1)
   }
 
   app.listen(port, () => {
-    console.log(`✓ Server is running on port ${port}`)
+    logger.info(`✓ Server is running on port ${port}`)
   })
 }
 
@@ -92,7 +105,7 @@ const startServer = async () => {
 // on exit before now (it also didn't need to, being unused). Mongo's client
 // is left as-is here: still non-fatal/unused by this slice, out of scope.
 const shutdown = async (signal: string): Promise<void> => {
-  console.log(`\n${signal} received, closing Postgres pool...`)
+  logger.info(`${signal} received, closing Postgres pool...`)
   await pool.end()
   process.exit(0)
 }

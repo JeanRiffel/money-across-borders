@@ -67,6 +67,9 @@ Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, 
 Postgres must be reachable and migrated before `npm run dev`/`npm start` — run `npm run db:migrate` once
 (idempotent, safe to re-run) against a fresh database first; the server exits immediately if it can't
 connect (see "What this is" above). `npm test` needs none of this — it never touches Postgres.
+Observability vars (`LOG_LEVEL`, `LOKI_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`) are
+optional — an unreachable Loki/Tempo degrades gracefully rather than blocking boot (see "Observability"
+below).
 
 ## Architecture
 
@@ -100,6 +103,7 @@ src/
  │    ├── config/database/     Postgres pool (+ transaction context, see below), Mongo singleton, Redis client
  │    │                        (Strategy pattern via DatabaseStrategy/DatabaseContext — Mongo only, see below)
  │    ├── config/message-broker/ RabbitMQ connection/producer/consumer
+ │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
  │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
  │    ├── pricing/             FlatPercentageFeeCalculator — mocked
@@ -159,6 +163,19 @@ Key patterns to follow when extending this code:
   nothing about how tests exercise `SendRemittanceUseCase`. Not implemented: `SELECT ... FOR UPDATE` row
   locking on the wallet reads inside the transaction — atomicity (all-or-nothing) is guaranteed, but not
   concurrent-debit race safety, which would need it.
+- **Observability** (`infra/observability/`): `logger.ts` is a single shared Pino logger, replacing scattered
+  `console.*` calls across `infra/config/**` — always logs pretty to stdout, and additionally ships
+  structured logs to Loki when `LOKI_URL` is set; Pino transports run in worker threads and `pino-loki`
+  reports its own push failures to stderr instead of throwing, so an unreachable Loki degrades to
+  stdout-only logging rather than crashing the app. `metrics.ts` registers Prometheus default Node metrics
+  plus generic RED metrics (`http_request_duration_seconds`, `http_requests_total`) via
+  `httpMetricsMiddleware`, exposed on `GET /metrics` — unauthenticated, like `GET /health`, since the
+  Prometheus scraper carries no JWT — for Prometheus to scrape directly (no push). `tracing.ts` bootstraps
+  OpenTelemetry auto-instrumentation exporting OTLP/HTTP traces to Tempo; it's imported as the very first
+  line of `src/main/server.ts`, ahead of every other import, because auto-instrumentation monkey-patches
+  modules (express, http, pg, ...) at `require()` time and has to run before anything it instruments gets
+  imported. Like Mongo (see below), a failed/unreachable Loki or Tempo is non-fatal — only the Postgres
+  check inside `buildApp()` blocks boot.
 - **Cross-currency ledger balancing**: a single transaction can't balance directly across two currencies.
   System-owned **treasury wallets** (one per supported currency, owned by the reserved
   `TREASURY_ACCOUNT_ID` in `domain/wallet/treasury-account.ts`, seeded via `seed-treasury-wallets.ts`) act

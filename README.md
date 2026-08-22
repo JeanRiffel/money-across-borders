@@ -217,16 +217,21 @@ This setup can be scaled locally using Docker Compose and mirrors real productio
 
 ## 🚀 Running Locally (High Level)
 
-* Docker Compose spins up:
+`docker-compose.yml` exists today, but as a minimal setup, not the multi-node/NGINX one this section
+used to describe (see CLAUDE.md's "Known inconsistencies"):
 
-  * Multiple API instances
-  * NGINX load balancer
+```bash
+docker compose up --build
+```
+
+spins up:
+
+  * The API (built from `Dockerfile`, migrations applied automatically on start)
   * PostgreSQL
-  * Redis
-  * MongoDB
-  * RabbitMQ
 
-Detailed instructions are provided in `docker-compose.yml`.
+That's it — Redis/MongoDB/RabbitMQ aren't part of this compose file yet, since nothing in the current
+request path uses them; multiple API instances behind an NGINX load balancer also aren't implemented yet.
+See `docker-compose.yml` and `CLAUDE.md` for what's actually wired up.
 
 ---
 

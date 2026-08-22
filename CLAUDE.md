@@ -58,6 +58,8 @@ npm run dev               # ts-node src/main/server.ts
 npm run dev:watch
 
 npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql
+
+docker compose up --build # app + Postgres in containers (see "Docker" below); no local install needed
 ```
 
 A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
@@ -70,6 +72,20 @@ connect (see "What this is" above). `npm test` needs none of this — it never t
 Observability vars (`LOG_LEVEL`, `LOKI_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`) are
 optional — an unreachable Loki/Tempo degrades gracefully rather than blocking boot (see "Observability"
 below).
+
+### Docker
+
+`docker compose up --build` runs the app in a container against a containerized Postgres — the only two
+services in `docker-compose.yml`. Mongo/RabbitMQ/Redis are intentionally left out: nothing in the current
+request path uses them (see "Known inconsistencies" below), so they aren't simulated just because
+`.env.example` lists them. `docker-entrypoint.sh` runs `npm run db:migrate` before starting the server on
+every container start, so no manual migration step is needed with this path. The `app` service builds from
+the repo's `Dockerfile` (multi-stage, `ts-node` + `tsconfig-paths` at runtime — no separate `tsc` build
+step, since several files import via the `src/...` baseUrl alias that plain compiled JS wouldn't resolve).
+Postgres is reachable from the host at `localhost:55432` (not the default 5432, to avoid clashing with a
+locally-running Postgres); the app itself talks to it over the compose network as `postgres:5432`. This is
+a deliberately minimal setup, not the multi-node NGINX + full-stack one the README describes — see the
+next bullet in "Known inconsistencies" for that gap.
 
 ## Architecture
 
@@ -220,8 +236,9 @@ Key patterns to follow when extending this code:
   `user-factory.ts` all wire to `postgres-registry.ts` — see Architecture above); Mongo persistence is
   still not — nothing in this slice touches it beyond the non-fatal connect-and-log at boot. `npm test`
   uses the `InMemory*` implementations directly, never Postgres.
-- The Docker Compose setup described in the README (multi-node NGINX load balancing, Postgres/Redis/
-  Mongo/RabbitMQ stack) is not present in the repo yet — no `docker-compose.yml`. Postgres today is
+- A `docker-compose.yml` now exists (see "Docker" above), but it's a minimal app+Postgres setup, not the
+  multi-node NGINX load balancing + Postgres/Redis/Mongo/RabbitMQ stack the README's "Running Locally"
+  section describes — that fuller setup is still not present in the repo. Outside Docker, Postgres is
   whatever `POSTGRES_HOST`/etc. in `.env` point at, started/managed outside this repo.
 - The compliance/KYC gate (`InMemoryComplianceChecker` — the name is legacy, it's a mocked business-rule
   checker, not an in-memory *store*; it takes whatever `KycProfileRepository` it's constructed with, and is

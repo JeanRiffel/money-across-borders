@@ -42,8 +42,18 @@ export class ExchangeRate {
     // Money.multiply() preserves the operand's currency, which is wrong here —
     // the result is denominated in quoteCurrency, not baseCurrency — so the
     // minor-units math is done directly instead of reusing that helper.
+    //
+    // `rate` is defined in major units (see class doc comment: "1 USD =
+    // 5.20 BRL"), but amount is in minor units — multiplying minor units by
+    // rate directly is only correct when base and quote share the same
+    // minor-unit exponent (true for all of USD/BRL/EUR/GBP today, which is
+    // why this was previously unnoticed). The exponent difference has to be
+    // applied explicitly so this stays correct if a currency with a
+    // different exponent (e.g. a 0-decimal currency) is ever added.
+    const exponentAdjustment = this.quoteCurrency.getMinorUnitExponent() - this.baseCurrency.getMinorUnitExponent()
+    const convertedMinorUnits = amount.getAmountMinorUnits() * this.rate * 10 ** exponentAdjustment
     return Money.fromMinorUnits(
-      Math.round(amount.getAmountMinorUnits() * this.rate),
+      Math.round(convertedMinorUnits),
       this.quoteCurrency
     )
   }

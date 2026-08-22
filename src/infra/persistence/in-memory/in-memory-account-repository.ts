@@ -10,8 +10,8 @@ export class InMemoryAccountRepository implements AccountRepository{
     this.accounts.push(account)
   }
 
-  async findbyId(_accountId: AccountId): Promise<Account | null> {
-    throw new Error("Method not implemented.");
+  async findbyId(accountId: AccountId): Promise<Account | null> {
+    return this.accounts.find(account => account.getId().equals(accountId)) ?? null
   }
 
   async findByUserId(userId: UserId): Promise<Account | null> {

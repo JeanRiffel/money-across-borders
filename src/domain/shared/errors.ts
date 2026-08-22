@@ -70,3 +70,17 @@ export class InvalidCredentialsError extends Error {
     this.name = 'InvalidCredentialsError'
   }
 }
+
+export class EmailAlreadyExistsError extends Error {
+  constructor(email: string) {
+    super(`An account with email ${email} already exists`)
+    this.name = 'EmailAlreadyExistsError'
+  }
+}
+
+export class IdempotencyKeyInFlightError extends Error {
+  constructor(key: string) {
+    super(`Request with idempotency key ${key} is already being processed`)
+    this.name = 'IdempotencyKeyInFlightError'
+  }
+}

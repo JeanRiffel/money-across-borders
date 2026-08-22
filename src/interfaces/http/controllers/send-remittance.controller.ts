@@ -10,6 +10,7 @@ import {
   RecipientWalletNotFoundError,
   UnsupportedCurrencyError,
   ExchangeRateNotAvailableError,
+  IdempotencyKeyInFlightError,
 } from "src/domain/shared/errors"
 
 export class SendRemittanceController {
@@ -37,6 +38,9 @@ export class SendRemittanceController {
       }
       if (error instanceof UnsupportedCurrencyError || error instanceof ExchangeRateNotAvailableError) {
         return { statusCode: 422, result: error.message }
+      }
+      if (error instanceof IdempotencyKeyInFlightError) {
+        return { statusCode: 409, result: error.message }
       }
       return { statusCode: 500, result: `Error on SendRemittanceUseCase: ${error}` }
     }

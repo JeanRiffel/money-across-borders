@@ -1,0 +1,55 @@
+# Minimal container setup: the app + the one dependency it actually needs to
+# boot (Postgres — see CLAUDE.md's "What this is": server.ts fails fast if
+# Postgres isn't reachable). Mongo/RabbitMQ/Redis exist in the codebase but
+# aren't wired into any request path yet, so they're intentionally left out
+# here rather than shipped unused. All values below can be overridden either
+# via shell env vars or by dropping a `.env` file next to this compose file
+# (docker compose loads it automatically for variable substitution).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-scaling_app}
+    ports:
+      # Host-side port only, for connecting a local psql/GUI client — the
+      # app talks to postgres over the internal compose network regardless
+      # (see POSTGRES_HOST=postgres below), so this defaults to a
+      # non-standard port to avoid clashing with a Postgres already running
+      # on the host's 5432. Override with POSTGRES_HOST_PORT if needed.
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DATABASE:-scaling_app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-scaling_app}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Mongo/Loki/Tempo are optional at boot (see CLAUDE.md) — left
+      # unset here on purpose. Point them at real services via a .env
+      # file if you also want to run those.
+    ports:
+      - "${PORT:-3000}:3000"
+
+volumes:
+  postgres_data:

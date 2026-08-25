@@ -16,6 +16,7 @@ import { ComplianceChecker } from "../../shared/compliance/compliance-checker"
 import { FeeCalculator } from "../../shared/pricing/fee-calculator"
 import { Clock } from "../../../domain/shared/clock"
 import { UnitOfWork } from "../../shared/transaction/unit-of-work"
+import { EventPublisher } from "../../shared/events/event-publisher"
 import {
   WalletNotFoundError,
   RecipientWalletNotFoundError,
@@ -34,7 +35,8 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
     private readonly complianceChecker: ComplianceChecker,
     private readonly feeCalculator: FeeCalculator,
     private readonly clock: Clock,
-    private readonly unitOfWork: UnitOfWork
+    private readonly unitOfWork: UnitOfWork,
+    private readonly eventPublisher: EventPublisher
   ) {}
 
   // Wrapped in a single DB transaction (see UnitOfWork): a failure anywhere
@@ -43,10 +45,33 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
   // posted remittance. The in-memory implementation is a no-op passthrough,
   // so this changes nothing about how tests exercise this use case.
   async execute(input: SendRemittanceInput): Promise<SendRemittanceOutput> {
-    return this.unitOfWork.runInTransaction(() => this.doExecute(input))
+    const remittance = await this.unitOfWork.runInTransaction(() => this.doExecute(input))
+
+    // Published only after runInTransaction resolves — i.e. only once the
+    // transaction has actually committed. Publishing from inside
+    // doExecute() instead would risk announcing a remittance.completed
+    // event for a transaction that still rolls back afterward (e.g. a
+    // COMMIT-time failure) — EventPublisher's own "never throws" contract
+    // guards the other direction (a down Kafka can't fail an already-
+    // committed remittance), but can't undo a wrong ordering here.
+    await this.eventPublisher.publish('remittance.completed', {
+      remittanceId: remittance.getId().getValue(),
+      senderAccountId: remittance.getSenderAccountId().getValue(),
+      recipientAccountId: remittance.getRecipientAccountId().getValue(),
+      status: remittance.getStatus().getDescription(),
+      sourceCurrency: remittance.getSourceAmount().getCurrency().getCode(),
+      sourceAmountMinorUnits: remittance.getSourceAmount().getAmountMinorUnits(),
+      feeMinorUnits: remittance.getFee().getAmountMinorUnits(),
+      destinationCurrency: remittance.getConvertedAmount().getCurrency().getCode(),
+      convertedAmountMinorUnits: remittance.getConvertedAmount().getAmountMinorUnits(),
+      exchangeRate: remittance.getExchangeRate(),
+      createdAt: remittance.getCreatedAt().toISOString(),
+    })
+
+    return SendRemittanceOutput.from(remittance)
   }
 
-  private async doExecute(input: SendRemittanceInput): Promise<SendRemittanceOutput> {
+  private async doExecute(input: SendRemittanceInput): Promise<Remittance> {
     const senderAccountId = AccountId.from(input.senderAccountId)
     const recipientAccountId = AccountId.from(input.recipientAccountId)
     const sourceCurrency = Currency.from(input.sourceCurrency)
@@ -144,7 +169,7 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
     )
 
     await this.remittanceRepository.save(remittance)
-    return SendRemittanceOutput.from(remittance)
+    return remittance
   }
 
   private async getTreasuryWallet(currency: Currency): Promise<Wallet> {

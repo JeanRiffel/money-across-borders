@@ -12,7 +12,12 @@ import { ComplianceChecker } from "src/application/shared/compliance/compliance-
 import { FeeCalculator } from "src/application/shared/pricing/fee-calculator"
 import { IdempotencyRepository } from "src/application/repositories/idempotency-repository"
 import { UnitOfWork } from "src/application/shared/transaction/unit-of-work"
+import { EventPublisher } from "src/application/shared/events/event-publisher"
 import { Clock } from "src/domain/shared/clock"
+import { SearchRemittancesUseCase } from "src/application/remittance/uses-cases/search-remittances-use-case"
+import { SearchRemittancesInput } from "src/application/remittance/dto/search-remittances-input"
+import { SearchRemittancesOutput } from "src/application/remittance/dto/search-remittances-output"
+import { RemittanceSearchIndex } from "src/application/remittance/repositories/remittance-search-index"
 
 export type RemittanceModuleDependencies = {
   walletRepository: WalletRepository
@@ -24,6 +29,7 @@ export type RemittanceModuleDependencies = {
   idempotencyRepository: IdempotencyRepository
   clock: Clock
   unitOfWork: UnitOfWork
+  eventPublisher: EventPublisher
 }
 
 export function buildRemittanceModule(
@@ -43,7 +49,8 @@ export function buildRemittanceModule(
       deps.complianceChecker,
       deps.feeCalculator,
       deps.clock,
-      deps.unitOfWork
+      deps.unitOfWork,
+      deps.eventPublisher
     )
 
   const idempotentSendRemittance =
@@ -53,4 +60,21 @@ export function buildRemittanceModule(
     )
 
   return idempotentSendRemittance
+}
+
+export type SearchRemittancesModuleDependencies = {
+  remittanceSearchIndex: RemittanceSearchIndex
+}
+
+// Deliberately separate from buildRemittanceModule above (own function, own
+// dependency type) — this is the CQRS read side, wired to Elasticsearch
+// (see remittance-search-index.ts), not to any of the Postgres/UnitOfWork/
+// IdempotencyRepository dependencies the write side needs. Not wrapped in
+// IdempotentDecorator either, same reasoning as LoginUseCase and
+// SearchRemittancesUseCase's own comment: it's a GET, not a
+// create-something-once action.
+export function buildSearchRemittancesModule(
+  deps: SearchRemittancesModuleDependencies
+): UseCase<SearchRemittancesInput, SearchRemittancesOutput> {
+  return new SearchRemittancesUseCase(deps.remittanceSearchIndex)
 }

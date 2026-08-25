@@ -13,14 +13,16 @@ import { userRouter } from "../interfaces/http/routes/user/routes"
 import { CreateAccountController } from "../interfaces/http/controllers/create-account.controller"
 import { OpenWalletController } from "../interfaces/http/controllers/open-wallet.controller"
 import { SendRemittanceController } from "../interfaces/http/controllers/send-remittance.controller"
+import { SearchRemittancesController } from "../interfaces/http/controllers/search-remittances.controller"
 import { LoginController } from "../interfaces/http/controllers/login.controller"
 import { createAccountUseCase } from "src/infra/factories/account-factory"
 import { createOpenWalletUseCase } from "src/infra/factories/wallet-factory"
-import { createSendRemittanceUseCase } from "src/infra/factories/remittance-factory"
+import { createSendRemittanceUseCase, createSearchRemittancesUseCase } from "src/infra/factories/remittance-factory"
 import { createLoginUseCase } from "src/infra/factories/user-factory"
 import { createJWTService } from "../infra/factories/jwt-factory"
 import { pool } from "../infra/config/database/postgresql/pg"
 import { connectRedis, redisClient } from "../infra/config/database/redis/redisClient"
+import { elasticsearchClient } from "../infra/config/database/elasticsearch/elasticsearch-client"
 dotenv.config()
 
 // Wires the Express app (Mongo check, Postgres check, all routers) without
@@ -80,6 +82,19 @@ export const buildApp = async (): Promise<Express> => {
     throw new Error(`Redis unavailable, cannot start: ${error}`)
   }
 
+  // GET /remittances reads from Elasticsearch (see remittance-factory.ts's
+  // createSearchRemittancesUseCase) — non-fatal like Mongo/RabbitMQ: it's a
+  // best-effort read model, not something account/wallet/remittance writes
+  // depend on. Just a reachability check — the `remittances` index itself
+  // is created lazily on first index()/search() call, not here (see
+  // ElasticsearchRemittanceSearchIndex.ensureIndexExists).
+  try {
+    await elasticsearchClient.ping()
+    logger.info('✓ Elasticsearch connection established')
+  } catch (error) {
+    logger.warn({ error }, '⚠ Elasticsearch unavailable, continuing without it (GET /remittances will error until it is)')
+  }
+
   const jwtService = createJWTService()
 
   const accountModule = createAccountUseCase()
@@ -92,7 +107,12 @@ export const buildApp = async (): Promise<Express> => {
   app.use(walletRouter(new OpenWalletController(walletModule), jwtService))
 
   const remittanceModule = await createSendRemittanceUseCase()
-  app.use(remittanceRouter(new SendRemittanceController(remittanceModule), jwtService))
+  const searchRemittancesModule = createSearchRemittancesUseCase()
+  app.use(remittanceRouter(
+    new SendRemittanceController(remittanceModule),
+    new SearchRemittancesController(searchRemittancesModule),
+    jwtService
+  ))
 
   return app
 }

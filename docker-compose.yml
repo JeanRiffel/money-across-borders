@@ -1,10 +1,13 @@
-# Minimal container setup: the app + the dependencies it actually needs to
-# boot (Postgres, and now Redis — see CLAUDE.md's "What this is": server.ts
-# fails fast if either is unreachable). Mongo/RabbitMQ still exist in the
-# codebase but aren't wired into any request path, so they stay left out
-# here rather than shipped unused. All values below can be overridden either
-# via shell env vars or by dropping a `.env` file next to this compose file
-# (docker compose loads it automatically for variable substitution).
+# Minimal container setup: Postgres and Redis are the two things the app
+# fails fast without (see CLAUDE.md's "What this is"). RabbitMQ is included
+# too, but as a non-fatal dependency — account.created (see src/infra/events/)
+# degrades to "the simulated email doesn't fire" rather than blocking boot or
+# any request if it's unreachable, so app doesn't wait on its healthcheck
+# below. Mongo still exists in the codebase but isn't wired into any request
+# path, so it stays left out here rather than shipped unused. All values
+# below can be overridden either via shell env vars or by dropping a `.env`
+# file next to this compose file (docker compose loads it automatically for
+# variable substitution).
 
 services:
   postgres:
@@ -35,12 +38,31 @@ services:
     ports:
       # Host-side port only, for connecting a local redis-cli — the app
       # talks to redis over the internal compose network regardless (see
-      # REDIS_URL=redis://redis:6379 below).
+      # REDIS_HOST=redis / REDIS_PORT=6379 below).
       - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      # Management UI, for poking at queues by hand (see the
+      # account.created queue after a signup).
+      - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -53,6 +75,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Not health-gated like postgres/redis above — see the top-of-file
+      # comment on why RabbitMQ being slow to become healthy shouldn't hold
+      # up app startup.
+      rabbitmq:
+        condition: service_started
     environment:
       PORT: 3000
       NODE_ENV: production
@@ -63,6 +90,10 @@ services:
       POSTGRES_DATABASE: ${POSTGRES_DATABASE:-scaling_app}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Mongo/Loki/Tempo are optional at boot (see CLAUDE.md) — left
@@ -71,6 +102,28 @@ services:
     ports:
       - "${PORT:-3000}:3000"
 
+  # Separate long-running process consuming account.created and simulating
+  # the confirmation email (see src/infra/events/consumers/account-created-
+  # consumer.ts) — without this running, published events just sit in the
+  # queue unconsumed; the app service alone doesn't do anything with them.
+  # Bypasses docker-entrypoint.sh (which always runs migrations + the HTTP
+  # server, ignoring any CMD override) via `entrypoint:`, since this process
+  # needs neither.
+  worker-account-created:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/account-created-consumer.ts"]
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:

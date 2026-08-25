@@ -2,6 +2,7 @@ import { CreateAccountUseCase } from '../../../../src/application/account/uses-c
 import { InMemoryAccountRepository } from '../../../../src/infra/persistence/in-memory/in-memory-account-repository'
 import { InMemoryUserRepository } from '../../../../src/infra/persistence/in-memory/in-memory-user-repository'
 import { BcryptPasswordHasher } from '../../../../src/infra/security/bycrypt-password-hasher'
+import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
 import { CreateAccountInput } from '../../../../src/application/account/dto/create-account-input'
 
 describe('CreateAccountUseCase', () => {
@@ -10,7 +11,8 @@ describe('CreateAccountUseCase', () => {
     const createUseCase = new CreateAccountUseCase(
       new InMemoryAccountRepository,
       new InMemoryUserRepository,
-      new BcryptPasswordHasher
+      new BcryptPasswordHasher,
+      new InMemoryEventPublisher
     )
 
     const input = CreateAccountInput.from({
@@ -23,5 +25,32 @@ describe('CreateAccountUseCase', () => {
     expect(useCase.status).toEqual('OPEN')
     expect(useCase.email).toEqual('john@test.com,')
 
+  })
+
+  it('publishes an account.created event after signup, simulating a confirmation email trigger', async () => {
+
+    const eventPublisher = new InMemoryEventPublisher()
+
+    const createUseCase = new CreateAccountUseCase(
+      new InMemoryAccountRepository,
+      new InMemoryUserRepository,
+      new BcryptPasswordHasher,
+      eventPublisher
+    )
+
+    const input = CreateAccountInput.from({
+      email: 'jane@test.com',
+      password: '1234'
+    })
+
+    const output = await createUseCase.execute(input)
+
+    const publishedEvents = eventPublisher.getPublishedEvents()
+    expect(publishedEvents).toHaveLength(1)
+    expect(publishedEvents[0].topic).toEqual('account.created')
+    expect(publishedEvents[0].payload).toMatchObject({
+      accountId: output.accountId,
+      email: 'jane@test.com',
+    })
   })
 })

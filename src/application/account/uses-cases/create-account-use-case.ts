@@ -12,6 +12,7 @@ import { CreateAccountOutput } from "../dto/create-account-output"
 import { CreateAccountInput } from "../dto/create-account-input"
 import { PasswordHasher } from "src/application/shared/security/password-hasher"
 import { EmailAlreadyExistsError } from "../../../domain/shared/errors"
+import { EventPublisher } from "src/application/shared/events/event-publisher"
 
 
 export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateAccountOutput> {
@@ -19,7 +20,12 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
   constructor(
     private readonly accountRepository: AccountRepository,
     private readonly userRepository: UserRepository,
-    private readonly passwordHasher: PasswordHasher
+    private readonly passwordHasher: PasswordHasher,
+    // No default (unlike, say, letting this silently fall back to a no-op
+    // infra adapter) — required and explicit, the same way SendRemittanceUseCase
+    // takes its UnitOfWork: the application layer depends on the
+    // EventPublisher port only, never on which infra adapter satisfies it.
+    private readonly eventPublisher: EventPublisher
   ){}
 
   async execute(input: CreateAccountInput): Promise<CreateAccountOutput>{
@@ -58,6 +64,19 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
       createdAt
     )
     await this.accountRepository.save(account)
+
+    // Simulates notifying the client that a confirmation email is on its
+    // way. Fire-and-forget in spirit: awaited here only to hand the message
+    // to the broker, not to wait for a (simulated) consumer to act on it —
+    // EventPublisher's contract guarantees this never throws, so a down/
+    // unreachable broker can't fail account creation over a non-critical
+    // side effect. See account-created-consumer.ts for the "email" side.
+    await this.eventPublisher.publish('account.created', {
+      accountId: account.getId().getValue(),
+      userId: user.getId().getValue(),
+      email: user.getEmail(),
+      createdAt: createdAt.toISOString(),
+    })
 
     return CreateAccountOutput.from(account, user)
   }

@@ -7,12 +7,14 @@ import { AccountRepository } from "src/domain/account/repository/account-reposit
 import { UserRepository } from "src/domain/user/repository/user-repository"
 import { IdempotencyRepository } from "src/application/repositories/idempotency-repository"
 import { BcryptPasswordHasher } from "src/infra/security/bycrypt-password-hasher"
+import { EventPublisher } from "src/application/shared/events/event-publisher"
 
 export type AccountModuleDependencies = {
   accountRepository: AccountRepository
   userRepository: UserRepository
   idempotencyRepository: IdempotencyRepository
   passwordHasher: BcryptPasswordHasher
+  eventPublisher: EventPublisher
 }
 
 export function buildAccountModule(
@@ -25,7 +27,8 @@ export function buildAccountModule(
     new CreateAccountUseCase(
       deps.accountRepository,
       deps.userRepository,
-      deps.passwordHasher
+      deps.passwordHasher,
+      deps.eventPublisher
     )
 
   const idempotentCreateAccount =

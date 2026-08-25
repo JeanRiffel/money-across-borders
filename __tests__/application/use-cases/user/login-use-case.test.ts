@@ -7,6 +7,7 @@ import { CreateAccountInput } from '../../../../src/application/account/dto/crea
 import { LoginInput } from '../../../../src/application/user/dto/login-input'
 import { InvalidCredentialsError } from '../../../../src/domain/shared/errors'
 import { TokenGenerator } from '../../../../src/application/shared/authentication/token-authentication'
+import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
 
 const fakeTokenGenerator: TokenGenerator = {
   generate: (payload: object) => `fake-token.${JSON.stringify(payload)}`
@@ -16,7 +17,7 @@ describe('LoginUseCase', () => {
 
   async function signUp(userRepository: InMemoryUserRepository, accountRepository: InMemoryAccountRepository) {
     const passwordHasher = new BcryptPasswordHasher()
-    const createAccount = new CreateAccountUseCase(accountRepository, userRepository, passwordHasher)
+    const createAccount = new CreateAccountUseCase(accountRepository, userRepository, passwordHasher, new InMemoryEventPublisher())
     const input = CreateAccountInput.from({ email: 'jane@test.com', password: 'correct-password' })
     return createAccount.execute(input)
   }

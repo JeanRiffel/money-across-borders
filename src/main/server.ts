@@ -20,6 +20,7 @@ import { createSendRemittanceUseCase } from "src/infra/factories/remittance-fact
 import { createLoginUseCase } from "src/infra/factories/user-factory"
 import { createJWTService } from "../infra/factories/jwt-factory"
 import { pool } from "../infra/config/database/postgresql/pg"
+import { connectRedis, redisClient } from "../infra/config/database/redis/redisClient"
 dotenv.config()
 
 // Wires the Express app (Mongo check, Postgres check, all routers) without
@@ -67,6 +68,18 @@ export const buildApp = async (): Promise<Express> => {
     throw new Error(`Postgres unavailable, cannot start: ${error}`)
   }
 
+  // Idempotency for account/wallet/remittance now lives in Redis (see
+  // redis-registry.ts and the *-factory.ts files) — IdempotentDecorator's
+  // claim() is the real concurrency gate for those use cases, so an
+  // unreachable Redis is fatal here for the same reason an unreachable
+  // Postgres is above, not degraded-non-fatal like Mongo below.
+  try {
+    await connectRedis()
+    logger.info('✓ Redis connection established')
+  } catch (error) {
+    throw new Error(`Redis unavailable, cannot start: ${error}`)
+  }
+
   const jwtService = createJWTService()
 
   const accountModule = createAccountUseCase()
@@ -104,9 +117,14 @@ const startServer = async () => {
 // First shutdown hooks in this codebase — nothing closed the Postgres pool
 // on exit before now (it also didn't need to, being unused). Mongo's client
 // is left as-is here: still non-fatal/unused by this slice, out of scope.
+// Redis is closed alongside Postgres now that it's load-bearing too (see
+// the connectRedis() call above).
 const shutdown = async (signal: string): Promise<void> => {
-  logger.info(`${signal} received, closing Postgres pool...`)
+  logger.info(`${signal} received, closing Postgres pool and Redis connection...`)
   await pool.end()
+  if (redisClient.isOpen) {
+    await redisClient.quit()
+  }
   process.exit(0)
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'))

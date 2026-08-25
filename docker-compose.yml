@@ -1,7 +1,7 @@
-# Minimal container setup: the app + the one dependency it actually needs to
-# boot (Postgres — see CLAUDE.md's "What this is": server.ts fails fast if
-# Postgres isn't reachable). Mongo/RabbitMQ/Redis exist in the codebase but
-# aren't wired into any request path yet, so they're intentionally left out
+# Minimal container setup: the app + the dependencies it actually needs to
+# boot (Postgres, and now Redis — see CLAUDE.md's "What this is": server.ts
+# fails fast if either is unreachable). Mongo/RabbitMQ still exist in the
+# codebase but aren't wired into any request path, so they stay left out
 # here rather than shipped unused. All values below can be overridden either
 # via shell env vars or by dropping a `.env` file next to this compose file
 # (docker compose loads it automatically for variable substitution).
@@ -29,11 +29,29 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      # Host-side port only, for connecting a local redis-cli — the app
+      # talks to redis over the internal compose network regardless (see
+      # REDIS_URL=redis://redis:6379 below).
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     build: .
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       PORT: 3000
@@ -43,6 +61,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DATABASE: ${POSTGRES_DATABASE:-scaling_app}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Mongo/Loki/Tempo are optional at boot (see CLAUDE.md) — left
@@ -53,3 +73,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

@@ -82,14 +82,17 @@ Used for all **critical financial data**:
 * Accounts
 * Ledger entries
 * Balances
-* Idempotency keys
+* ~~Idempotency keys~~ — moved to Redis, see below
 
 Key characteristics:
 
-* ACID compliant
-* `SERIALIZABLE` isolation level
-* Explicit row locking
-* Retry handling for serialization failures
+* ✅ ACID compliant, atomic multi-write transactions (`UnitOfWork` — `BEGIN`/`COMMIT`/`ROLLBACK`
+  around `SendRemittanceUseCase`)
+* 🚧 `SERIALIZABLE` isolation level, explicit row locking (`SELECT ... FOR UPDATE`), retry handling for
+  serialization failures — none of these are implemented; transactions run at Postgres's default
+  isolation level with no row locking on the wallet reads inside `SendRemittanceUseCase`. Atomicity
+  (all-or-nothing) is guaranteed; concurrent-debit race safety is not — see [CLAUDE.md](CLAUDE.md)'s
+  `UnitOfWork` note.
 
 ---
 
@@ -97,15 +100,21 @@ Key characteristics:
 
 Used only where it adds real value:
 
-* Fast lookup of idempotency keys
-* Optional distributed locking
-* Optional rate limiting
+* ✅ Fast lookup of idempotency keys — implemented: `account`/`wallet`/`remittance` idempotency is
+  Redis-backed (`SET ... NX EX` for the atomic claim, TTL-based expiry instead of Postgres's
+  never-pruned `idempotency_records` table)
+* 🚧 Distributed locking — not implemented; see [CLAUDE.md](CLAUDE.md)'s `UnitOfWork` note on the
+  concurrent-debit race this would need to close
+* 🚧 Rate limiting — not implemented
 
 ⚠️ Redis is **never** the source of truth.
 
 ---
 
 ### MongoDB — Audit & Observability
+
+🚧 Not implemented — the app connects and logs at boot (non-fatal if unreachable) and nothing else
+touches it. The rest of this section describes the target design, not current behavior.
 
 Stores:
 
@@ -125,15 +134,21 @@ This allows:
 
 Used for asynchronous processing:
 
-* Transaction processed events
-* Ledger update notifications
-* Audit persistence
-* Future integrations (email, webhooks)
+* ✅ Simulated confirmation email — implemented: `CreateAccountUseCase` publishes `account.created`
+  after signup, consumed by a standalone worker (`npm run worker:account-created`) that logs a
+  simulated "email sent" line
+* 🚧 Transaction/ledger update notifications, audit persistence, real email/webhook delivery — not
+  implemented; the one thing wired up today is the account-created case above
 
 Supports:
 
 * Loose coupling
 * Eventual consistency where appropriate
+
+Publishing is deliberately **best-effort**, not `UnitOfWork`-grade: an unreachable broker logs a
+warning and the triggering request still succeeds — see [CLAUDE.md](CLAUDE.md)'s `EventPublisher` note
+for why that's the right trade-off for a non-critical side effect like this one (and the wrong one for
+an actual ledger write).
 
 ---
 
@@ -144,7 +159,9 @@ All mutating endpoints require an `Idempotency-Key` header.
 Flow:
 
 1. Request arrives with `Idempotency-Key`
-2. System checks Redis / PostgreSQL
+2. System checks Redis (the current backing store for `account`/`wallet`/`remittance` — see the Redis
+   section above; `PostgresIdempotencyRepository` still exists in the codebase but isn't wired to
+   anything today)
 3. If key exists → previously stored response is returned
 4. If not → request is processed atomically
 5. Result is persisted together with the idempotency key
@@ -155,18 +172,13 @@ This guarantees **exactly-once semantics**, even under retries or duplicate requ
 
 ## 🧮 Transactions & Consistency
 
-All balance mutations are executed inside:
+All balance mutations in `SendRemittanceUseCase` run inside one Postgres transaction (`UnitOfWork` —
+see [CLAUDE.md](CLAUDE.md)), so a failure partway through rolls back every wallet/ledger/remittance
+write instead of leaving a partial posting.
 
-* `SERIALIZABLE` transactions
-* Explicit row-level locks
-* Controlled retry logic
-
-This ensures:
-
-* No lost updates
-* No dirty reads
-* No phantom reads
-* Strong financial correctness
+🚧 Not implemented: `SERIALIZABLE` isolation, explicit row-level locks, or retry-on-serialization-failure
+logic — this repo currently guarantees all-or-nothing atomicity, not protection against a concurrent
+debit race on the same wallet.
 
 ---
 
@@ -227,10 +239,13 @@ docker compose up --build
 spins up:
 
   * The API (built from `Dockerfile`, migrations applied automatically on start)
-  * PostgreSQL
+  * PostgreSQL — required; the API fails to start without it
+  * Redis — required; backs idempotency for `account`/`wallet`/`remittance` (see the Redis section above)
+  * RabbitMQ — optional at boot; backs the simulated confirmation-email flow (see the RabbitMQ section above)
+  * A worker process consuming the confirmation-email events off RabbitMQ
 
-That's it — Redis/MongoDB/RabbitMQ aren't part of this compose file yet, since nothing in the current
-request path uses them; multiple API instances behind an NGINX load balancer also aren't implemented yet.
+That's it — MongoDB isn't part of this compose file, since nothing in the current request path uses it;
+multiple API instances behind an NGINX load balancer also aren't implemented yet.
 See `docker-compose.yml` and `CLAUDE.md` for what's actually wired up.
 
 ---

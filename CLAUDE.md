@@ -34,6 +34,17 @@ remittance calls; there's no per-resource authorization layer yet. Several other
 stubbed (see "Known inconsistencies" below). Don't assume the whole tree compiles or that every wired-up
 path is functional; check the specific files you're touching.
 
+Idempotency itself is **not** part of that Postgres-backed flow anymore: `IdempotencyRepository` for
+`account`/`wallet`/`remittance` is now Redis-backed (`src/infra/persistence/redis/`, see the Idempotency
+bullet in Architecture below) — a real, load-bearing dependency, not the dead client it used to be. `server.ts`
+fails fast on an unreachable Redis the same way it does for Postgres. Separately, `CreateAccountUseCase`
+publishes an `account.created` event to RabbitMQ after signup (`src/infra/events/`), consumed by a
+standalone worker process (`npm run worker:account-created`) that simulates sending a confirmation email —
+this is the one thing RabbitMQ is wired to today. Unlike Redis, RabbitMQ stays non-fatal: an unreachable
+broker just means the simulated email doesn't fire for that signup, not that signup fails (see the
+`EventPublisher` bullet in Architecture below). Mongo is still the odd one out — non-fatal connect-and-log
+at boot, nothing else touches it.
+
 ## Commands
 
 There is no `node_modules` installed in this environment — run `bun install` or `npm install` first.
@@ -59,33 +70,51 @@ npm run dev:watch
 
 npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql
 
-docker compose up --build # app + Postgres in containers (see "Docker" below); no local install needed
+npm run worker:account-created # separate process: consumes account.created from RabbitMQ, simulates
+                                # sending a confirmation email (see the Architecture EventPublisher bullet)
+
+docker compose up --build # app + Postgres + Redis + RabbitMQ + the worker above, in containers (see
+                           # "Docker" below); no local install needed
 ```
 
 A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
 
 Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `POSTGRES_HOST`/
-`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `MONGO_URI`, `RABBITMQ_URL`.
-Postgres must be reachable and migrated before `npm run dev`/`npm start` — run `npm run db:migrate` once
-(idempotent, safe to re-run) against a fresh database first; the server exits immediately if it can't
-connect (see "What this is" above). `npm test` needs none of this — it never touches Postgres.
+`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `REDIS_HOST`/`REDIS_PORT`/
+`REDIS_PASSWORD` (password optional — unset unless the Redis you're pointing at actually requires one),
+`MONGO_URI`, `RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USER`/`RABBITMQ_PASSWORD`. Postgres and Redis must
+both be reachable before `npm run dev`/`npm start`/`npm run worker:account-created` — run `npm run
+db:migrate` once (idempotent, safe to re-run) against a fresh Postgres database first; the server exits
+immediately if either connection check fails (see "What this is" above). RabbitMQ, like Mongo, degrades
+non-fatally if unreachable rather than blocking boot. `npm test` needs none of this — it never touches
+Postgres, Redis, or RabbitMQ. Every config module that reads `process.env.*` (`pg.ts`, `redisClient.ts`,
+`rabbitmq-connection.ts`) calls `dotenv.config()` itself at import time — don't assume an entrypoint has
+already loaded `.env` before importing one; skipping this bit the `worker:account-created` script once
+(RabbitMQ env vars read as `undefined`, connection fell back to `guest:guest@localhost` and failed auth)
+before `rabbitmq-connection.ts` got its own `dotenv.config()` call, matching `pg.ts`'s existing pattern.
 Observability vars (`LOG_LEVEL`, `LOKI_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`) are
 optional — an unreachable Loki/Tempo degrades gracefully rather than blocking boot (see "Observability"
 below).
 
 ### Docker
 
-`docker compose up --build` runs the app in a container against a containerized Postgres — the only two
-services in `docker-compose.yml`. Mongo/RabbitMQ/Redis are intentionally left out: nothing in the current
-request path uses them (see "Known inconsistencies" below), so they aren't simulated just because
-`.env.example` lists them. `docker-entrypoint.sh` runs `npm run db:migrate` before starting the server on
-every container start, so no manual migration step is needed with this path. The `app` service builds from
-the repo's `Dockerfile` (multi-stage, `ts-node` + `tsconfig-paths` at runtime — no separate `tsc` build
-step, since several files import via the `src/...` baseUrl alias that plain compiled JS wouldn't resolve).
-Postgres is reachable from the host at `localhost:55432` (not the default 5432, to avoid clashing with a
-locally-running Postgres); the app itself talks to it over the compose network as `postgres:5432`. This is
-a deliberately minimal setup, not the multi-node NGINX + full-stack one the README describes — see the
-next bullet in "Known inconsistencies" for that gap.
+`docker compose up --build` runs five services: `postgres`, `redis`, `rabbitmq`, `app`, and
+`worker-account-created`. Mongo is the one intentionally left out — nothing in the current request path
+uses it (see "Known inconsistencies" below), so it isn't simulated just because `.env.example` lists it.
+`docker-entrypoint.sh` runs `npm run db:migrate` before starting the server on every container start, so no
+manual migration step is needed with this path. The `app` service builds from the repo's `Dockerfile`
+(multi-stage, `ts-node` + `tsconfig-paths` at runtime — no separate `tsc` build step, since several files
+import via the `src/...` baseUrl alias that plain compiled JS wouldn't resolve); `worker-account-created`
+reuses the same image but overrides `entrypoint:` to run the consumer script directly, bypassing
+`docker-entrypoint.sh` (which always runs migrations + the HTTP server regardless of `CMD`, so it can't be
+reused for a different process as-is). `app` depends on `postgres` and `redis` being healthy before
+starting (both are fatal-if-unreachable, see "What this is" above) but only on `rabbitmq` having *started*
+— not healthy — since an unreachable broker is non-fatal and shouldn't hold up boot. Postgres/Redis/
+RabbitMQ are reachable from the host at `localhost:55432`/`localhost:6379`/`localhost:5672` (Postgres on a
+non-default port to avoid clashing with a locally-running one; RabbitMQ's management UI is also exposed at
+`localhost:15672`); the app itself talks to all three over the compose network (`postgres:5432`,
+`redis:6379`, `rabbitmq:5672`). This is still a deliberately minimal setup, not the multi-node NGINX +
+full-stack one the README describes — see the next bullet in "Known inconsistencies" for that gap.
 
 ## Architecture
 
@@ -113,20 +142,33 @@ src/
  ├── application/<context>/    use cases + DTOs, orchestrate domain objects
  │    ├── repositories/        ports the application layer depends on (e.g. IdempotencyRepository)
  │    └── shared/              cross-cutting ports: authentication, idempotency, security, exchange, compliance,
- │                              pricing, transaction (UnitOfWork)
+ │                              pricing, transaction (UnitOfWork), events (EventPublisher)
  ├── infra/                    concrete adapters implementing domain/application ports
  │    ├── authentication/      JWTService (implements TokenGenerator + TokenVerifier)
- │    ├── config/database/     Postgres pool (+ transaction context, see below), Mongo singleton, Redis client
- │    │                        (Strategy pattern via DatabaseStrategy/DatabaseContext — Mongo only, see below)
- │    ├── config/message-broker/ RabbitMQ connection/producer/consumer
+ │    ├── config/database/     Postgres pool (+ transaction context, see below), Mongo singleton, Redis
+ │    │                        client (Strategy pattern via DatabaseStrategy/DatabaseContext — Mongo only,
+ │    │                        see below) — pg.ts, redisClient.ts, and message-broker/rabbitmq-connection.ts
+ │    │                        (below) all call dotenv.config() themselves; see the Commands section
+ │    ├── config/message-broker/ rabbitmq-connection.ts — the real, used connection module. Its sibling
+ │    │                        rabbitmq-producer.ts/rabbitmq-consumer.ts are dead, pre-pivot leftovers that
+ │    │                        don't even compile (import domain/transaction/... paths that no longer exist)
+ │    │                        — the actual producer/consumer live in events/ below, not here
+ │    ├── events/               EventPublisher adapters: InMemoryEventPublisher (records published events,
+ │    │                        used in tests), RabbitMQEventPublisher (real — never throws, logs+swallows
+ │    │                        its own connect/publish failures). consumers/account-created-consumer.ts is a
+ │    │                        separate long-running process (npm run worker:account-created), not part of
+ │    │                        buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
  │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
  │    ├── pricing/             FlatPercentageFeeCalculator — mocked
  │    ├── factories/           wire concrete adapters into a use case (e.g. account-factory.ts, remittance-factory.ts)
- │    ├── persistence/         postgresql/ (the repos every factory wires to, plus postgres-registry.ts,
- │    │                        postgres-unit-of-work.ts, and migrations/), in-memory/ (what tests construct
- │    │                        directly instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
+ │    ├── persistence/         postgresql/ (the repos every factory wires to for everything except
+ │    │                        idempotency, plus postgres-registry.ts, postgres-unit-of-work.ts, and
+ │    │                        migrations/), redis/ (RedisIdempotencyRepository + redis-registry.ts — what
+ │    │                        account/wallet/remittance factories wire idempotencyRepository to instead,
+ │    │                        see the Idempotency bullet below), in-memory/ (what tests construct directly
+ │    │                        instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
  │    ├── security/            BcryptPasswordHasher
  │    └── time/                SystemClock
  ├── interfaces/http/          Express-facing layer: controllers, routes, middlewares
@@ -147,6 +189,13 @@ Key patterns to follow when extending this code:
   every keyless request would collide on the same cache entry). Note `InMemoryIdempotencyRepository
   .findByKey` resolves to the cached **response value directly** (see its test), not a wrapping
   `{key, response}` record — `IdempotentDecorator` reads it as `existing as O`, not `existing.response`.
+  `account-factory.ts`/`wallet-factory.ts`/`remittance-factory.ts` wire `idempotencyRepository` to
+  `RedisIdempotencyRepository` (`infra/persistence/redis/`) now, not Postgres: `claim()` is `SET key
+  IN_FLIGHT NX EX <30s>` (the same atomic reservation the Postgres adapter gets from its `UNIQUE`
+  constraint), `save()` overwrites with the response under a 24h TTL, and `release()` uses a Lua
+  check-and-delete script so it can never clobber a response a concurrent `save()` already wrote.
+  `PostgresIdempotencyRepository` still exists and is still correct, just unused by any factory now — it
+  was the load-bearing implementation before this switch.
 - **Entities** are plain classes with private fields, `get*()` accessors, and no setters (immutable-style).
   IDs and enums are value objects (`AccountId`, `AccountStatus`, `WalletId`, `EntryDirection`, ...) with
   private constructors and static factories (`.generate()`, `.from()`), not raw strings/numbers. Entities
@@ -160,10 +209,12 @@ Key patterns to follow when extending this code:
 - **Wiring order**: domain port → application use case (depends on port interfaces only) → infra adapter
   (implements the port) → factory in `infra/factories/` (constructs adapters + calls a `main/.../*-module.ts`
   builder) → `main/server.ts` (calls the factory, injects into a controller/router).
-- **Every `*-factory.ts` wires to `infra/persistence/postgresql/postgres-registry.ts`** — one shared
-  instance of each `Postgres*Repository` (each takes no constructor args; they call a shared
-  `getExecutor()` helper from `config/database/postgresql/pg.ts` per query instead of holding injected
-  state). `infra/persistence/in-memory/in-memory-registry.ts` is the parallel in-memory equivalent, kept in
+- **Every `*-factory.ts` wires to `infra/persistence/postgresql/postgres-registry.ts`** for everything
+  except idempotency — one shared instance of each `Postgres*Repository` (each takes no constructor args;
+  they call a shared `getExecutor()` helper from `config/database/postgresql/pg.ts` per query instead of
+  holding injected state). `idempotencyRepository` is the one exception: it comes from
+  `infra/persistence/redis/redis-registry.ts` instead (see the Idempotency bullet above).
+  `infra/persistence/in-memory/in-memory-registry.ts` is the parallel in-memory equivalent, kept in
   sync in shape but **not imported by any factory or test** — every use-case test constructs its own
   `InMemory*Repository` instances directly (see "Tests mirror..." below), so the in-memory registry itself
   is currently unused scaffolding, kept only as the in-memory stack's one obvious entry point.
@@ -179,6 +230,19 @@ Key patterns to follow when extending this code:
   nothing about how tests exercise `SendRemittanceUseCase`. Not implemented: `SELECT ... FOR UPDATE` row
   locking on the wallet reads inside the transaction — atomicity (all-or-nothing) is guaranteed, but not
   concurrent-debit race safety, which would need it.
+- **`EventPublisher`** (`application/shared/events/event-publisher.ts`) publishes a domain event — a topic
+  string + a plain payload — with a contract deliberately weaker than `UnitOfWork`'s: implementations
+  **must not throw**. Every event published through it so far (`CreateAccountUseCase` → `account.created`,
+  after `accountRepository.save()`) is a best-effort side effect, not a correctness guarantee — unlike a
+  ledger write, losing one occasionally is acceptable, so a signup should never fail because the broker is
+  down. `RabbitMQEventPublisher` (`infra/events/`) catches and logs its own connect/publish failures rather
+  than propagating them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in
+  an array). `CreateAccountUseCase` takes its `EventPublisher` as a required constructor arg, same as
+  `SendRemittanceUseCase` takes its `UnitOfWork` — no default, so every construction site (factory, test)
+  is explicit about which adapter it's using. The consumer side
+  (`infra/events/consumers/account-created-consumer.ts`) is a separate long-running process — run it with
+  `npm run worker:account-created` — that logs a simulated "confirmation email sent" line per event and
+  acks; nothing about `account.created` publishing depends on that consumer being up.
 - **Observability** (`infra/observability/`): `logger.ts` is a single shared Pino logger, replacing scattered
   `console.*` calls across `infra/config/**` — always logs pretty to stdout, and additionally ships
   structured logs to Loki when `LOKI_URL` is set; Pino transports run in worker threads and `pino-loki`
@@ -233,13 +297,15 @@ Key patterns to follow when extending this code:
   updated for the cross-border pivot; the rest was not. Trust this file and the actual tree over the
   README's body.
 - Postgres persistence is functional (`account-factory.ts`, `wallet-factory.ts`, `remittance-factory.ts`,
-  `user-factory.ts` all wire to `postgres-registry.ts` — see Architecture above); Mongo persistence is
-  still not — nothing in this slice touches it beyond the non-fatal connect-and-log at boot. `npm test`
-  uses the `InMemory*` implementations directly, never Postgres.
-- A `docker-compose.yml` now exists (see "Docker" above), but it's a minimal app+Postgres setup, not the
-  multi-node NGINX load balancing + Postgres/Redis/Mongo/RabbitMQ stack the README's "Running Locally"
-  section describes — that fuller setup is still not present in the repo. Outside Docker, Postgres is
-  whatever `POSTGRES_HOST`/etc. in `.env` point at, started/managed outside this repo.
+  `user-factory.ts` all wire to `postgres-registry.ts` for everything except idempotency — see Architecture
+  above); Mongo persistence is still not — nothing in this slice touches it beyond the non-fatal
+  connect-and-log at boot. `npm test` uses the `InMemory*` implementations directly, never Postgres, Redis,
+  or RabbitMQ.
+- A `docker-compose.yml` now covers Postgres, Redis, RabbitMQ, the app, and the `account.created` worker
+  (see "Docker" above), but it's still not the multi-node NGINX load balancing + Mongo stack the README's
+  "Running Locally" section describes — that fuller setup (NGINX, multiple API instances, Mongo) is still
+  not present in the repo. Outside Docker, Postgres/Redis/RabbitMQ are whatever `POSTGRES_HOST`/`REDIS_HOST`/
+  `RABBITMQ_HOST`/etc. in `.env` point at, started/managed outside this repo.
 - The compliance/KYC gate (`InMemoryComplianceChecker` — the name is legacy, it's a mocked business-rule
   checker, not an in-memory *store*; it takes whatever `KycProfileRepository` it's constructed with, and is
   wired to the Postgres one via `remittance-factory.ts`) has no HTTP submit/verify endpoint — a
@@ -275,5 +341,3 @@ still runs against the in-memory repos.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.
-
-fgdg

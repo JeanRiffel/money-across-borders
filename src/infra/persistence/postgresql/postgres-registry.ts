@@ -5,6 +5,7 @@ import { PostgresLedgerRepository } from "./postgres-ledger-repository"
 import { PostgresRemittanceRepository } from "./postgres-remittance-repository"
 import { PostgresKycProfileRepository } from "./postgres-kyc-profile-repository"
 import { PostgresIdempotencyRepository } from "./postgres-idempotency-repository"
+import { PostgresOutboxRepository } from "./postgres-outbox-repository"
 import { PostgresUnitOfWork } from "./postgres-unit-of-work"
 
 /**
@@ -25,5 +26,6 @@ export const postgresRegistry = {
   remittanceRepository: new PostgresRemittanceRepository(),
   kycProfileRepository: new PostgresKycProfileRepository(),
   idempotencyRepository: new PostgresIdempotencyRepository(),
+  outboxRepository: new PostgresOutboxRepository(),
   unitOfWork: new PostgresUnitOfWork(),
 }

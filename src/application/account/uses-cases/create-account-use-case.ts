@@ -12,7 +12,7 @@ import { CreateAccountOutput } from "../dto/create-account-output"
 import { CreateAccountInput } from "../dto/create-account-input"
 import { PasswordHasher } from "src/application/shared/security/password-hasher"
 import { EmailAlreadyExistsError } from "../../../domain/shared/errors"
-import { EventPublisher } from "src/application/shared/events/event-publisher"
+import { OutboxRepository } from "src/application/shared/events/outbox-repository"
 import { UnitOfWork } from "src/application/shared/transaction/unit-of-work"
 
 
@@ -27,38 +27,32 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
     // commit together — without this, a failure between the two saves
     // leaves an orphaned User with no matching Account (see doExecute).
     private readonly unitOfWork: UnitOfWork,
-    // No default (unlike, say, letting this silently fall back to a no-op
-    // infra adapter) — required and explicit, the same way SendRemittanceUseCase
-    // takes its UnitOfWork: the application layer depends on the
-    // EventPublisher port only, never on which infra adapter satisfies it.
-    private readonly eventPublisher: EventPublisher
+    // Transactional Outbox (see outbox-repository.ts): this use case no
+    // longer talks to RabbitMQ directly at all. Publishing account.created
+    // straight to the broker after commit — the previous approach — had its
+    // own gap: EventPublisher.publish() never throws (by contract), so a
+    // broker outage, or a process crash in the window between the commit
+    // and that call, silently loses the event with no way to notice or
+    // retry. Writing to the outbox instead happens *inside* the same
+    // transaction as the User + Account saves (see doExecute), so the
+    // event's durability is exactly as strong as the signup itself; a
+    // separate relay process (src/infra/events/consumers/outbox-relay.ts)
+    // is the one that actually calls RabbitMQ, retrying on its next poll
+    // until it succeeds.
+    private readonly outboxRepository: OutboxRepository
   ){}
 
-  // The User + Account saves run inside a single DB transaction (see
-  // UnitOfWork): a failure after the User save but before the Account save
-  // now rolls both back instead of leaving an orphaned User with no
-  // Account — which used to lock that email out permanently (the
-  // pre-check below would find the User and throw EmailAlreadyExistsError
-  // on every retry, forever). The in-memory implementation is a no-op
-  // passthrough, so this changes nothing about how tests exercise this
-  // use case.
+  // The User + Account saves — and the account.created outbox write — all
+  // run inside a single DB transaction (see UnitOfWork): a failure
+  // anywhere in doExecute() rolls back everything, so there's never a
+  // committed User without an Account (which used to lock that email out
+  // permanently — the pre-check below would find the User and throw
+  // EmailAlreadyExistsError on every retry, forever) and never a committed
+  // signup whose event never made it anywhere durable. The in-memory
+  // implementation is a no-op passthrough, so this changes nothing about
+  // how tests exercise this use case.
   async execute(input: CreateAccountInput): Promise<CreateAccountOutput>{
     const { account, user } = await this.unitOfWork.runInTransaction(() => this.doExecute(input))
-
-    // Published only after runInTransaction resolves — i.e. only once the
-    // transaction has actually committed. Publishing from inside
-    // doExecute() instead would risk announcing account.created for a
-    // signup that still rolls back afterward (e.g. a COMMIT-time
-    // failure) — EventPublisher's own "never throws" contract guards the
-    // other direction (a down RabbitMQ can't fail an already-committed
-    // signup), but can't undo a wrong ordering here.
-    await this.eventPublisher.publish('account.created', {
-      accountId: account.getId().getValue(),
-      userId: user.getId().getValue(),
-      email: user.getEmail(),
-      createdAt: user.getCreatedAt().toISOString(),
-    })
-
     return CreateAccountOutput.from(account, user)
   }
 
@@ -98,6 +92,16 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
       createdAt
     )
     await this.accountRepository.save(account)
+
+    // Written inside this same transaction — see the constructor comment
+    // on outboxRepository and the UnitOfWork comment on execute() above —
+    // instead of publishing to RabbitMQ directly here.
+    await this.outboxRepository.add('account.created', {
+      accountId: account.getId().getValue(),
+      userId: user.getId().getValue(),
+      email: user.getEmail(),
+      createdAt: createdAt.toISOString(),
+    })
 
     return { account, user }
   }

@@ -1,10 +1,13 @@
 # Minimal container setup: Postgres and Redis are the two things the app
 # fails fast without (see CLAUDE.md's "What this is"). RabbitMQ, Kafka, and
 # Elasticsearch are included too, but as non-fatal dependencies —
-# account.created/remittance.completed (see src/infra/events/) degrade to
-# "the simulated email/search-index update doesn't fire" rather than
-# blocking boot or any write request if they're unreachable; GET
-# /remittances is the only thing that actually needs Elasticsearch. Mongo
+# remittance.completed (see src/infra/events/) degrades to "the search-index
+# update doesn't fire" rather than blocking boot or any write request if
+# Kafka/Elasticsearch are unreachable; GET /remittances is the only thing
+# that actually needs Elasticsearch. account.created is durable regardless
+# of RabbitMQ being reachable (see the Transactional Outbox note on
+# worker-outbox-relay below) — an unreachable broker there just means the
+# simulated confirmation email is delayed until it's back, not lost. Mongo
 # still exists in the codebase but isn't wired into any request path, so it
 # stays left out here rather than shipped unused.
 #
@@ -212,6 +215,36 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_CLIENT_ID: money-across-borders-remittance-indexer
       ELASTICSEARCH_URL: http://elasticsearch:9200
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  # Separate long-running process polling outbox_events (see
+  # src/infra/events/consumers/outbox-relay.ts) and relaying unpublished
+  # account.created rows to RabbitMQ — the Transactional Outbox's other
+  # half. CreateAccountUseCase only ever writes to Postgres now (inside its
+  # UnitOfWork transaction); without this running, those rows just sit
+  # unpublished and worker-account-created below never sees them. Needs
+  # postgres healthy (it polls outbox_events directly, same table
+  # CreateAccountUseCase writes to) unlike the other two workers above,
+  # which only depend on their broker having started.
+  worker-outbox-relay:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/outbox-relay.ts"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-scaling_app}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
 volumes:

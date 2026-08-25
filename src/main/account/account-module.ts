@@ -7,7 +7,7 @@ import { AccountRepository } from "src/domain/account/repository/account-reposit
 import { UserRepository } from "src/domain/user/repository/user-repository"
 import { IdempotencyRepository } from "src/application/repositories/idempotency-repository"
 import { BcryptPasswordHasher } from "src/infra/security/bycrypt-password-hasher"
-import { EventPublisher } from "src/application/shared/events/event-publisher"
+import { OutboxRepository } from "src/application/shared/events/outbox-repository"
 import { UnitOfWork } from "src/application/shared/transaction/unit-of-work"
 
 export type AccountModuleDependencies = {
@@ -16,7 +16,7 @@ export type AccountModuleDependencies = {
   idempotencyRepository: IdempotencyRepository
   passwordHasher: BcryptPasswordHasher
   unitOfWork: UnitOfWork
-  eventPublisher: EventPublisher
+  outboxRepository: OutboxRepository
 }
 
 export function buildAccountModule(
@@ -31,7 +31,7 @@ export function buildAccountModule(
       deps.userRepository,
       deps.passwordHasher,
       deps.unitOfWork,
-      deps.eventPublisher
+      deps.outboxRepository
     )
 
   const idempotentCreateAccount =

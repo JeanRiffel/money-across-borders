@@ -42,9 +42,14 @@ be. `server.ts` fails fast on an unreachable Redis the same way it does for Post
 
 Beyond Postgres/Redis, four more pieces of infra are wired to specific, narrow jobs — all non-fatal at boot,
 none of them a correctness guarantee for the account/wallet/remittance write path itself:
-- **RabbitMQ**: `CreateAccountUseCase` publishes `account.created` after signup (`src/infra/events/`),
-  consumed by a standalone worker (`npm run worker:account-created`) that simulates sending a confirmation
-  email. A task-queue-shaped job — one event, one consumer, no replay needed.
+- **RabbitMQ**: `CreateAccountUseCase` no longer publishes `account.created` directly — it writes the event
+  to a Postgres **Transactional Outbox** (`outbox_events`, inside the same transaction as the User + Account
+  saves; see the `Transactional Outbox` bullet in Architecture below) instead, closing the gap where a
+  broker outage or a crash between commit and publish used to lose the event silently (`EventPublisher`'s
+  contract is "must not throw," so nothing surfaced that loss). A separate relay worker (`npm run
+  worker:outbox-relay`) polls that table and is the only thing that actually publishes to RabbitMQ, consumed
+  in turn by another standalone worker (`npm run worker:account-created`) that simulates sending a
+  confirmation email. A task-queue-shaped job — one event, one consumer, no replay needed.
 - **Kafka**: `SendRemittanceUseCase` publishes `remittance.completed` after its transaction commits, consumed
   by a standalone worker (`npm run worker:remittance-indexer`) that indexes it into Elasticsearch. An
   event-stream-shaped job instead — a business fact a consumer group can replay, chosen over RabbitMQ for
@@ -82,7 +87,8 @@ npm start                # nodemon --exec bun run src/main/server.ts
 npm run dev               # ts-node src/main/server.ts
 npm run dev:watch
 
-npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql
+npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql +
+                           # 003_create_outbox_events.sql
 
 npm run worker:account-created # separate process: consumes account.created from RabbitMQ, simulates
                                 # sending a confirmation email (see the Architecture EventPublisher bullet)
@@ -90,7 +96,11 @@ npm run worker:account-created # separate process: consumes account.created from
 npm run worker:remittance-indexer # separate process: consumes remittance.completed from Kafka, indexes
                                    # it into Elasticsearch for GET /remittances
 
-docker compose up --build # app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + both workers
+npm run worker:outbox-relay # separate process: polls Postgres outbox_events and publishes unpublished
+                             # rows to RabbitMQ (see the Architecture Transactional Outbox bullet) —
+                             # account.created only reaches worker:account-created's queue via this
+
+docker compose up --build # app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + all three workers
                            # above, in containers (see "Docker" below); no local install needed
 ```
 
@@ -122,20 +132,24 @@ Loki/Tempo degrades gracefully rather than blocking boot (see "Observability" be
 
 ### Docker
 
-`docker compose up --build` runs eight services: `postgres`, `redis`, `rabbitmq`, `kafka`, `elasticsearch`,
-`app`, `worker-account-created`, and `worker-remittance-indexer`. Mongo is the one intentionally left out —
+`docker compose up --build` runs nine services: `postgres`, `redis`, `rabbitmq`, `kafka`, `elasticsearch`,
+`app`, `worker-account-created`, `worker-remittance-indexer`, and `worker-outbox-relay`. Mongo is the one
+intentionally left out —
 nothing in the current request path *requires* it (see "What this is" above: `POST /kyc` degrades to
 "dossier not archived" without it, same as RabbitMQ/Kafka/Elasticsearch degrade without theirs), so it isn't
 simulated just because `.env.example` lists it. `docker-entrypoint.sh` runs `npm run db:migrate` before
 starting the server on every container start, so no manual migration step is needed with this path. The
 `app` service builds from the repo's `Dockerfile` (multi-stage, `ts-node` + `tsconfig-paths` at runtime — no
 separate `tsc` build step, since several files import via the `src/...` baseUrl alias that plain compiled JS
-wouldn't resolve); both `worker-*` services reuse the same image but override `entrypoint:` to run their
-consumer script directly, bypassing `docker-entrypoint.sh` (which always runs migrations + the HTTP server
-regardless of `CMD`, so it can't be reused for a different process as-is). `app` depends on `postgres` and
-`redis` being healthy before starting (both are fatal-if-unreachable, see "What this is" above) but only on
-`rabbitmq`/`kafka`/`elasticsearch` having *started* — not healthy — since all three are non-fatal and
-shouldn't hold up boot.
+wouldn't resolve); all three `worker-*` services reuse the same image but override `entrypoint:` to run
+their consumer/relay script directly, bypassing `docker-entrypoint.sh` (which always runs migrations + the
+HTTP server regardless of `CMD`, so it can't be reused for a different process as-is). `app` depends on
+`postgres` and `redis` being healthy before starting (both are fatal-if-unreachable, see "What this is"
+above) but only on `rabbitmq`/`kafka`/`elasticsearch` having *started* — not healthy — since all three are
+non-fatal and shouldn't hold up boot. `worker-outbox-relay` is the one worker that also depends on
+`postgres` being *healthy* (not just started, unlike the other two workers) — it polls `outbox_events`
+directly, the same table `CreateAccountUseCase` writes to, so it needs a real, migrated Postgres to have
+anything to read.
 
 Host-side ports default away from each service's standard port (`6380` not `6379`, `5673`/`15673` not
 `5672`/`15672`, `9094` not `9092`, `9201` not `9200`) so `docker compose up` here doesn't collide with a
@@ -191,24 +205,28 @@ src/
  │    ├── events/               EventPublisher adapters: InMemoryEventPublisher (records published events,
  │    │                        used in tests), RabbitMQEventPublisher + KafkaEventPublisher (real — never
  │    │                        throw, log+swallow their own connect/publish failures; see the EventPublisher
- │    │                        bullet below for which use case gets which). consumers/ holds two separate
- │    │                        long-running processes — account-created-consumer.ts (npm run
- │    │                        worker:account-created) and remittance-completed-indexer.ts (npm run
- │    │                        worker:remittance-indexer) — neither is part of buildApp()
+ │    │                        bullet below for which use case gets which — RabbitMQEventPublisher itself is
+ │    │                        currently unused by any factory, see the Transactional Outbox bullet).
+ │    │                        consumers/ holds three separate long-running processes — account-created-
+ │    │                        consumer.ts (npm run worker:account-created), remittance-completed-indexer.ts
+ │    │                        (npm run worker:remittance-indexer), and outbox-relay.ts (npm run
+ │    │                        worker:outbox-relay) — none is part of buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
  │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
  │    ├── pricing/             FlatPercentageFeeCalculator — mocked
  │    ├── factories/           wire concrete adapters into a use case (e.g. account-factory.ts, remittance-factory.ts)
  │    ├── persistence/         postgresql/ (the repos every factory wires to for everything except
- │    │                        idempotency, plus postgres-registry.ts, postgres-unit-of-work.ts, and
- │    │                        migrations/), redis/ (RedisIdempotencyRepository + redis-registry.ts — what
- │    │                        account/wallet/remittance/kyc factories wire idempotencyRepository to
+ │    │                        idempotency, plus postgres-registry.ts, postgres-unit-of-work.ts,
+ │    │                        postgres-outbox-repository.ts — see the Transactional Outbox bullet below —
+ │    │                        and migrations/), redis/ (RedisIdempotencyRepository + redis-registry.ts —
+ │    │                        what account/wallet/remittance/kyc factories wire idempotencyRepository to
  │    │                        instead, see the Idempotency bullet below), elasticsearch/
  │    │                        (ElasticsearchRemittanceSearchIndex — GET /remittances's read model),
  │    │                        mongodb/ (MongoKycDossierRepository — POST /kyc's dossier archive, the first
  │    │                        real Mongo consumer in this codebase), in-memory/ (what tests construct
- │    │                        directly instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
+ │    │                        directly instead — in-memory-registry.ts, in-memory-unit-of-work.ts,
+ │    │                        in-memory-outbox-repository.ts)
  │    ├── security/            BcryptPasswordHasher
  │    └── time/                SystemClock
  ├── interfaces/http/          Express-facing layer: controllers, routes, middlewares
@@ -271,14 +289,39 @@ Key patterns to follow when extending this code:
   nothing about how tests exercise `SendRemittanceUseCase`. Not implemented: `SELECT ... FOR UPDATE` row
   locking on the wallet reads inside the transaction — atomicity (all-or-nothing) is guaranteed, but not
   concurrent-debit race safety, which would need it.
+- **Transactional Outbox** (`application/shared/events/outbox-repository.ts`, the `OutboxRepository` port)
+  solves a gap plain `EventPublisher` calls have: publishing to a broker directly, even right after a
+  transaction commits, is two unrelated operations against two different systems — a broker outage, or a
+  process crash in the exact window between the commit and the publish call, silently loses the event, and
+  `EventPublisher`'s own "must not throw" contract (see below) means nothing ever surfaces that loss.
+  `CreateAccountUseCase` is the one consumer today: instead of publishing `account.created` to RabbitMQ
+  itself, it calls `outboxRepository.add('account.created', payload)` from *inside* `doExecute()` — i.e.
+  inside the same `unitOfWork.runInTransaction(...)` call as the `User` + `Account` saves — so the write to
+  `outbox_events` (`migrations/003_create_outbox_events.sql`) either commits together with the signup or
+  rolls back together with it; there's no window where one exists without the other.
+  `PostgresOutboxRepository` (`infra/persistence/postgresql/`) does a plain `INSERT`/`SELECT`/`UPDATE`
+  through the shared `getExecutor()`, same as every other `Postgres*Repository` — that's what makes `add()`
+  transparently join whatever transaction is in flight. A separate relay process
+  (`infra/events/consumers/outbox-relay.ts`, `npm run worker:outbox-relay`) polls `outbox_events` for
+  unpublished rows (default every 5s, `OUTBOX_RELAY_INTERVAL_MS`) and is the only thing that actually calls
+  RabbitMQ for these — deliberately *not* via `RabbitMQEventPublisher` (its swallow-and-log contract is
+  exactly wrong for a relay whose whole job is to notice a failed publish and retry it); a failed publish
+  just leaves the row unpublished for the next poll, no separate retry/backoff bookkeeping. `InMemoryOutboxRepository`
+  is the test fake, mirroring the rest of the in-memory stack. `SendRemittanceUseCase`/`remittance.completed`
+  does **not** go through the outbox — see the `EventPublisher` bullet below for why that gap is judged
+  acceptable there (Kafka's own retention already gives it a different safety net a task-queue event like
+  `account.created` doesn't have).
 - **`EventPublisher`** (`application/shared/events/event-publisher.ts`) publishes a domain event — a topic
   string + a plain payload — with a contract deliberately weaker than `UnitOfWork`'s: implementations
   **must not throw**. Every event published through it is a best-effort side effect, not a correctness
   guarantee — unlike a ledger write, losing one occasionally is acceptable. Two producers exist, each on a
   different broker, deliberately — the broker is picked per event based on how it's meant to be consumed,
   not "whichever queue already exists":
-    - `CreateAccountUseCase` → `account.created` (after `accountRepository.save()`) → `RabbitMQEventPublisher`.
-      Task-queue-shaped: one event, one consumer (the simulated-email worker), no reason to replay it later.
+    - `CreateAccountUseCase` → `account.created`, now via the Transactional Outbox above rather than a
+      direct `publish()` call — `RabbitMQEventPublisher` itself is unused by any factory today, kept only
+      as a correct, generic `EventPublisher` adapter (see its own file comment). Task-queue-shaped: one
+      event, one consumer (the simulated-email worker), no reason to replay it later — which is also why
+      only this one got the outbox treatment and `remittance.completed` below didn't.
     - `SendRemittanceUseCase` → `remittance.completed` (after `unitOfWork.runInTransaction()` resolves — see
       the `UnitOfWork` bullet above; published outside the transaction on purpose, so a remittance that ends
       up rolled back can never have already announced itself as completed) → `KafkaEventPublisher`.
@@ -288,16 +331,19 @@ Key patterns to follow when extending this code:
 
   Both adapters (`infra/events/`) catch and log their own connect/publish failures rather than propagating
   them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in an array).
-  `CreateAccountUseCase`/`SendRemittanceUseCase` take their `EventPublisher` as a required constructor arg,
-  same as `SendRemittanceUseCase` takes its `UnitOfWork` — no default, so every construction site (factory,
-  test) is explicit about which adapter it's using. Two separate consumer processes exist in
-  `infra/events/consumers/`, neither part of `buildApp()`:
+  `SendRemittanceUseCase` takes its `EventPublisher` as a required constructor arg, same as it takes its
+  `UnitOfWork` — no default, so every construction site (factory, test) is explicit about which adapter it's
+  using; `CreateAccountUseCase` takes an `OutboxRepository` in that same required-constructor-arg slot
+  instead now (see the Transactional Outbox bullet above). Three separate consumer/relay processes exist in
+  `infra/events/consumers/`, none part of `buildApp()`:
     - `account-created-consumer.ts` (`npm run worker:account-created`) logs a simulated "confirmation email
       sent" line per event and acks.
     - `remittance-completed-indexer.ts` (`npm run worker:remittance-indexer`) indexes each event into
       Elasticsearch via `ElasticsearchRemittanceSearchIndex` (`infra/persistence/elasticsearch/`) — catches
       and logs its own indexing failures rather than crashing the consumer (same best-effort posture as
       `EventPublisher` itself), so a bad message is dropped, not retried forever.
+    - `outbox-relay.ts` (`npm run worker:outbox-relay`) is the producer side of the pair above — see the
+      Transactional Outbox bullet.
 
   `GET /remittances` (`SearchRemittancesUseCase`) is the CQRS read side these two feed: it reads from
   Elasticsearch only, never Postgres, via `RemittanceSearchIndex`

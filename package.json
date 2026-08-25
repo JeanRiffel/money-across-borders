@@ -55,6 +55,7 @@
     "db:migrate": "ts-node src/infra/persistence/postgresql/migrations/run-migrations.ts",
     "worker:account-created": "ts-node src/infra/events/consumers/account-created-consumer.ts",
     "worker:remittance-indexer": "ts-node src/infra/events/consumers/remittance-completed-indexer.ts",
+    "worker:outbox-relay": "ts-node src/infra/events/consumers/outbox-relay.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

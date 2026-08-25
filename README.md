@@ -6,9 +6,12 @@ DDD, SOLID, ACID transactions, idempotency, and horizontal scalability** using a
 domain. It's still, first and foremost, an architecture showcase: the payments domain is the vehicle, not
 the point.
 
-> Note: the sections below this point predate the cross-border pivot and describe the project's original
-> account/ledger framing — see [CLAUDE.md](CLAUDE.md) for the current architecture and domain model
-> (wallets, ledger, exchange, compliance, remittance).
+> Note: the "Domain Overview," "Core Use Cases," and "Clean Architecture Structure" sections below predate
+> the cross-border pivot and describe the project's original account/ledger framing — see
+> [AGENTS.md](AGENTS.md) for the current domain model (wallets, ledger, exchange, compliance, remittance).
+> The "Technology Choices & Responsibilities" and "Running Locally" sections have been refreshed to match
+> what's actually implemented today; see [docs/infrastructure.md](docs/infrastructure.md) and
+> [docs/architecture.md](docs/architecture.md) for the full detail behind them.
 
 This project is intentionally **small in surface area** (few endpoints) and **deep in architectural concepts**, focusing on correctness, consistency, and scalability rather than feature sprawl.
 
@@ -52,103 +55,119 @@ All balance changes are recorded as immutable ledger entries (double-entry style
 
 ## 🏗️ Architecture Overview
 
+One Express API instance talks synchronously to the two services it can't boot without; everything else
+is an optional, non-fatal side path wired to one specific job:
+
+**Synchronous dependencies** — the API talks to these directly, on the request path:
+
 ```
-                ┌──────────────┐
-                │   NGINX LB   │
-                └──────┬───────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│ API Node #1 │ │ API Node #2 │ │ API Node #3 │
-│  (Stateless)│ │  (Stateless)│ │  (Stateless)│
-└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
-       │               │               │
-       ├───────────────┴───────────────┤
-       │
-┌───────────────────────────────────────────┐
-│ PostgreSQL | Redis | MongoDB | RabbitMQ   │
-└───────────────────────────────────────────┘
+Express API (1 node)
+ ├─▶ PostgreSQL   [required, blocks boot]  accounts, wallets, ledger, remittances, KYC, outbox_events
+ ├─▶ Redis        [required, blocks boot]  idempotency keys (account/wallet/remittance/kyc)
+ └─▶ MongoDB      [optional, non-fatal]    KYC dossier archive (POST /kyc only)
 ```
+
+**Asynchronous pipelines** — each is a straight line from a use case, through a broker, to a standalone
+worker process; none of them sit on the request path, and all degrade non-fatally if unreachable:
+
+```
+CreateAccountUseCase
+  → outbox_events (same Postgres transaction as the signup)
+  → worker:outbox-relay (polls the table)
+  → RabbitMQ (account.created)
+  → worker:account-created
+  → logs a simulated confirmation email
+
+SendRemittanceUseCase
+  → Kafka (remittance.completed, published after the transaction commits)
+  → worker:remittance-indexer
+  → Elasticsearch
+  → GET /remittances reads from here (CQRS read model; Postgres stays the source of truth)
+```
+
+A multi-node API behind an NGINX load balancer, as described further down in "Scalability Approach," is
+the target design, not what's running today — see [docs/known-issues.md](docs/known-issues.md).
 
 ---
 
 ## 🧩 Technology Choices & Responsibilities
 
-### PostgreSQL — Source of Truth
+Two services are **load-bearing**: the app fails fast (`process.exit(1)`) at boot if either is
+unreachable. Four more back one specific, narrow job each and are **non-fatal** if unreachable — the
+request path that doesn't touch them keeps working. See [docs/infrastructure.md](docs/infrastructure.md)
+for the full detail (env vars, Docker ports, exact failure modes) behind every bullet below.
 
-Used for all **critical financial data**:
+### PostgreSQL — Source of Truth (required)
 
-* Accounts
-* Ledger entries
-* Balances
-* ~~Idempotency keys~~ — moved to Redis, see below
+All critical financial data: accounts, wallets, ledger entries, remittances, KYC profiles, and the
+transactional outbox (`outbox_events`).
 
-Key characteristics:
+* ✅ ACID, atomic multi-write transactions (`UnitOfWork` — real `BEGIN`/`COMMIT`/`ROLLBACK` around
+  `SendRemittanceUseCase`)
+* ✅ Transactional Outbox: `CreateAccountUseCase` writes `account.created` to `outbox_events` inside the
+  *same* transaction as the User + Account saves, closing the gap where a broker outage or crash between
+  commit and publish used to lose the event silently
+* 🚧 `SERIALIZABLE` isolation, explicit row locking (`SELECT ... FOR UPDATE`), retry-on-serialization —
+  not implemented; transactions run at Postgres's default isolation with no row locking on the wallet
+  reads inside `SendRemittanceUseCase`. Atomicity (all-or-nothing) is guaranteed; concurrent-debit race
+  safety is not — see [docs/architecture.md](docs/architecture.md)'s `UnitOfWork` note.
 
-* ✅ ACID compliant, atomic multi-write transactions (`UnitOfWork` — `BEGIN`/`COMMIT`/`ROLLBACK`
-  around `SendRemittanceUseCase`)
-* 🚧 `SERIALIZABLE` isolation level, explicit row locking (`SELECT ... FOR UPDATE`), retry handling for
-  serialization failures — none of these are implemented; transactions run at Postgres's default
-  isolation level with no row locking on the wallet reads inside `SendRemittanceUseCase`. Atomicity
-  (all-or-nothing) is guaranteed; concurrent-debit race safety is not — see [CLAUDE.md](CLAUDE.md)'s
-  `UnitOfWork` note.
+### Redis — Idempotency (required)
 
----
-
-### Redis — Performance & Coordination
-
-Used only where it adds real value:
-
-* ✅ Fast lookup of idempotency keys — implemented: `account`/`wallet`/`remittance` idempotency is
-  Redis-backed (`SET ... NX EX` for the atomic claim, TTL-based expiry instead of Postgres's
-  never-pruned `idempotency_records` table)
-* 🚧 Distributed locking — not implemented; see [CLAUDE.md](CLAUDE.md)'s `UnitOfWork` note on the
-  concurrent-debit race this would need to close
-* 🚧 Rate limiting — not implemented
+* ✅ `account`/`wallet`/`remittance`/`kyc` idempotency keys are Redis-backed: `SET key IN_FLIGHT NX EX
+  <30s>` for the atomic claim, then an overwrite with the response under a 24h TTL. A Lua
+  check-and-delete script backs `release()` so it can never clobber a response a concurrent `save()`
+  already wrote. (`PostgresIdempotencyRepository` still exists in the codebase, correct but unused by any
+  factory now.)
+* 🚧 Distributed locking, rate limiting — not implemented
 
 ⚠️ Redis is **never** the source of truth.
 
----
+### RabbitMQ — Task Queue (optional, non-fatal)
 
-### MongoDB — Audit & Observability
+Backs exactly one flow today: the simulated account-confirmation email. `npm run worker:outbox-relay`
+polls `outbox_events` (default every 5s) and is the only thing that actually publishes to RabbitMQ; `npm
+run worker:account-created` consumes `account.created` off it and logs a simulated "email sent" line. A
+task-queue-shaped job — one event, one consumer, no replay needed — which is why it went through the
+outbox above rather than a direct `publish()` call.
 
-🚧 Not implemented — the app connects and logs at boot (non-fatal if unreachable) and nothing else
-touches it. The rest of this section describes the target design, not current behavior.
+### Kafka — Event Stream (optional, non-fatal)
 
-Stores:
+Backs the remittance search read model. `SendRemittanceUseCase` publishes `remittance.completed` after
+its transaction commits (published *outside* the transaction on purpose, so a rolled-back remittance can
+never have already announced itself as completed); `npm run worker:remittance-indexer` consumes it and
+indexes into Elasticsearch. An event-stream-shaped job — a business fact a consumer group can replay —
+chosen over RabbitMQ for that reason; it does **not** go through the transactional outbox, since Kafka's
+own retention already gives it a different safety net.
 
-* Raw transaction requests
-* Processed event snapshots
-* Debug and audit logs
+### Elasticsearch — Remittance Search / CQRS Read Model (optional, non-fatal)
 
-This allows:
+Backs `GET /remittances` only (`SearchRemittancesUseCase`) — a denormalized, eventually-consistent
+projection kept in sync by the Kafka consumer above. Postgres's `RemittanceRepository` remains the
+source of truth; this index can lag, or error if Elasticsearch is down when a search request comes in —
+`GET /remittances` is the only thing that depends on it.
 
-* Easy inspection
-* Replay scenarios
-* Separation of transactional and analytical workloads
+### MongoDB — KYC Dossier Archive (optional, non-fatal, outside Docker Compose)
 
----
+Backs `POST /kyc`'s dossier archive only (`MongoKycDossierRepository`) — the raw submitted material
+(documents, notes), never the `KycProfile` status the compliance checker actually reads (that's
+Postgres). Everything else (account/wallet/remittance) doesn't touch it. Deliberately left out of
+`docker-compose.yml` — nothing in the request path *requires* it, so it isn't simulated just because
+`.env.example` lists it; point `MONGO_HOST`/etc. in `.env` at an instance you run yourself if you want to
+exercise this path.
 
-### RabbitMQ — Event-Driven Workflow
+### Observability (optional, non-fatal)
 
-Used for asynchronous processing:
+Not shown in the diagram above since it sits alongside every request rather than in one specific flow:
+Pino structured logs (shipped to Loki if `LOKI_URL` is set), Prometheus RED metrics on `GET /metrics`,
+and OpenTelemetry traces exported to Tempo. All three degrade gracefully — an unreachable Loki/Tempo
+doesn't block boot or fail a request.
 
-* ✅ Simulated confirmation email — implemented: `CreateAccountUseCase` publishes `account.created`
-  after signup, consumed by a standalone worker (`npm run worker:account-created`) that logs a
-  simulated "email sent" line
-* 🚧 Transaction/ledger update notifications, audit persistence, real email/webhook delivery — not
-  implemented; the one thing wired up today is the account-created case above
-
-Supports:
-
-* Loose coupling
-* Eventual consistency where appropriate
-
-Publishing is deliberately **best-effort**, not `UnitOfWork`-grade: an unreachable broker logs a
-warning and the triggering request still succeeds — see [CLAUDE.md](CLAUDE.md)'s `EventPublisher` note
-for why that's the right trade-off for a non-critical side effect like this one (and the wrong one for
-an actual ledger write).
+⚠️ Publishing to RabbitMQ/Kafka is deliberately **best-effort**, not `UnitOfWork`-grade: both
+`EventPublisher` adapters catch and log their own connect/publish failures instead of throwing. That's
+the right trade-off for a non-critical side effect like a confirmation email or a search index update —
+and the wrong one for an actual ledger write, which is why those still go through Postgres's real
+transactions above.
 
 ---
 
@@ -159,8 +178,8 @@ All mutating endpoints require an `Idempotency-Key` header.
 Flow:
 
 1. Request arrives with `Idempotency-Key`
-2. System checks Redis (the current backing store for `account`/`wallet`/`remittance` — see the Redis
-   section above; `PostgresIdempotencyRepository` still exists in the codebase but isn't wired to
+2. System checks Redis (the current backing store for `account`/`wallet`/`remittance`/`kyc` — see the
+   Redis section above; `PostgresIdempotencyRepository` still exists in the codebase but isn't wired to
    anything today)
 3. If key exists → previously stored response is returned
 4. If not → request is processed atomically
@@ -173,8 +192,8 @@ This guarantees **exactly-once semantics**, even under retries or duplicate requ
 ## 🧮 Transactions & Consistency
 
 All balance mutations in `SendRemittanceUseCase` run inside one Postgres transaction (`UnitOfWork` —
-see [CLAUDE.md](CLAUDE.md)), so a failure partway through rolls back every wallet/ledger/remittance
-write instead of leaving a partial posting.
+see [docs/architecture.md](docs/architecture.md)), so a failure partway through rolls back every
+wallet/ledger/remittance write instead of leaving a partial posting.
 
 🚧 Not implemented: `SERIALIZABLE` isolation, explicit row-level locks, or retry-on-serialization-failure
 logic — this repo currently guarantees all-or-nothing atomicity, not protection against a concurrent
@@ -229,24 +248,30 @@ This setup can be scaled locally using Docker Compose and mirrors real productio
 
 ## 🚀 Running Locally (High Level)
 
-`docker-compose.yml` exists today, but as a minimal setup, not the multi-node/NGINX one this section
-used to describe (see CLAUDE.md's "Known inconsistencies"):
+`docker-compose.yml` exists today, but as a single-node setup, not the multi-node/NGINX one described in
+"Scalability Approach" above (see [docs/known-issues.md](docs/known-issues.md)):
 
 ```bash
 docker compose up --build
 ```
 
-spins up:
+spins up nine services:
 
-  * The API (built from `Dockerfile`, migrations applied automatically on start)
-  * PostgreSQL — required; the API fails to start without it
-  * Redis — required; backs idempotency for `account`/`wallet`/`remittance` (see the Redis section above)
-  * RabbitMQ — optional at boot; backs the simulated confirmation-email flow (see the RabbitMQ section above)
-  * A worker process consuming the confirmation-email events off RabbitMQ
+  * `app` — the API (built from `Dockerfile`; runs migrations automatically on container start,
+    depends on `postgres`/`redis` being healthy before it starts)
+  * `postgres` — required; the API fails to start without it
+  * `redis` — required; backs idempotency for `account`/`wallet`/`remittance`/`kyc` (see the Redis
+    section above)
+  * `rabbitmq`, `kafka`, `elasticsearch` — optional at boot (`app` only waits for these to have
+    *started*, not be healthy); back the RabbitMQ and Kafka/Elasticsearch pipelines above
+  * `worker-account-created`, `worker-remittance-indexer`, `worker-outbox-relay` — the three standalone
+    worker processes for the async pipelines diagrammed above
 
-That's it — MongoDB isn't part of this compose file, since nothing in the current request path uses it;
-multiple API instances behind an NGINX load balancer also aren't implemented yet.
-See `docker-compose.yml` and `CLAUDE.md` for what's actually wired up.
+MongoDB is the one piece **not** in this compose file — nothing in the request path requires it, so it
+isn't simulated just because `.env.example` lists it; point `MONGO_HOST`/etc. in `.env` at an instance
+you run yourself if you want to exercise `POST /kyc`'s dossier archive. Multiple API instances behind an
+NGINX load balancer also aren't implemented yet. See `docker-compose.yml` and
+[docs/infrastructure.md](docs/infrastructure.md) for exact ports/env vars and what's actually wired up.
 
 ---
 

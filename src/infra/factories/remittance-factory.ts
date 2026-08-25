@@ -4,6 +4,7 @@ import { SendRemittanceInput } from "src/application/remittance/dto/send-remitta
 import { SendRemittanceOutput } from "src/application/remittance/dto/send-remittance-output";
 import { SystemClock } from "../time/system-clock";
 import { postgresRegistry } from "../persistence/postgresql/postgres-registry";
+import { redisRegistry } from "../persistence/redis/redis-registry";
 import { MockExchangeRateProvider } from "../exchange/mock-exchange-rate-provider";
 import { InMemoryComplianceChecker } from "../compliance/in-memory-compliance-checker";
 import { FlatPercentageFeeCalculator } from "../pricing/flat-percentage-fee-calculator";
@@ -22,7 +23,8 @@ export async function createSendRemittanceUseCase(): Promise<UseCase<SendRemitta
     exchangeRateProvider: new MockExchangeRateProvider(),
     complianceChecker: new InMemoryComplianceChecker(postgresRegistry.kycProfileRepository),
     feeCalculator: new FlatPercentageFeeCalculator(),
-    idempotencyRepository: postgresRegistry.idempotencyRepository,
+    // See the equivalent comment in account-factory.ts.
+    idempotencyRepository: redisRegistry.idempotencyRepository,
     clock,
     unitOfWork: postgresRegistry.unitOfWork
   }

@@ -3,6 +3,7 @@ import { InMemoryAccountRepository } from '../../../../src/infra/persistence/in-
 import { InMemoryUserRepository } from '../../../../src/infra/persistence/in-memory/in-memory-user-repository'
 import { BcryptPasswordHasher } from '../../../../src/infra/security/bycrypt-password-hasher'
 import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
+import { InMemoryUnitOfWork } from '../../../../src/infra/persistence/in-memory/in-memory-unit-of-work'
 import { CreateAccountInput } from '../../../../src/application/account/dto/create-account-input'
 
 describe('CreateAccountUseCase', () => {
@@ -12,6 +13,7 @@ describe('CreateAccountUseCase', () => {
       new InMemoryAccountRepository,
       new InMemoryUserRepository,
       new BcryptPasswordHasher,
+      new InMemoryUnitOfWork,
       new InMemoryEventPublisher
     )
 
@@ -35,6 +37,7 @@ describe('CreateAccountUseCase', () => {
       new InMemoryAccountRepository,
       new InMemoryUserRepository,
       new BcryptPasswordHasher,
+      new InMemoryUnitOfWork,
       eventPublisher
     )
 

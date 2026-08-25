@@ -18,6 +18,10 @@ export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccoun
     // staying synchronous.
     idempotencyRepository: redisRegistry.idempotencyRepository,
     passwordHasher: new BcryptPasswordHasher(),
+    // Wraps the User + Account saves in one real Postgres transaction —
+    // see the UnitOfWork comment on CreateAccountUseCase. Same shared
+    // instance remittance-factory.ts wires SendRemittanceUseCase to.
+    unitOfWork: postgresRegistry.unitOfWork,
     // Publishes account.created to RabbitMQ (see account-created-consumer.ts
     // for the "simulated confirmation email" side) — unlike Redis above,
     // an unreachable broker here is non-fatal: RabbitMQEventPublisher

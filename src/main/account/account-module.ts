@@ -8,12 +8,14 @@ import { UserRepository } from "src/domain/user/repository/user-repository"
 import { IdempotencyRepository } from "src/application/repositories/idempotency-repository"
 import { BcryptPasswordHasher } from "src/infra/security/bycrypt-password-hasher"
 import { EventPublisher } from "src/application/shared/events/event-publisher"
+import { UnitOfWork } from "src/application/shared/transaction/unit-of-work"
 
 export type AccountModuleDependencies = {
   accountRepository: AccountRepository
   userRepository: UserRepository
   idempotencyRepository: IdempotencyRepository
   passwordHasher: BcryptPasswordHasher
+  unitOfWork: UnitOfWork
   eventPublisher: EventPublisher
 }
 
@@ -28,6 +30,7 @@ export function buildAccountModule(
       deps.accountRepository,
       deps.userRepository,
       deps.passwordHasher,
+      deps.unitOfWork,
       deps.eventPublisher
     )
 

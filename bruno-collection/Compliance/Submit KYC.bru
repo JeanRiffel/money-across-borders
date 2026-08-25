@@ -1,0 +1,65 @@
+meta {
+  name: Submit KYC
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/kyc
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{$guid}}
+  Authorization: Bearer {{jwt_token}}
+}
+
+body:json {
+  {
+    "accountId": "{{senderAccountId}}",
+    "fullName": "Jane Doe",
+    "documentId": "PASSPORT-123456",
+    "documentType": "PASSPORT",
+    "attachments": [
+      { "label": "passport-photo", "reference": "s3://bucket/passport.jpg" }
+    ],
+    "notes": "Submitted via Bruno for manual testing"
+  }
+}
+
+docs {
+  POST /kyc — closes the gap CLAUDE.md used to document ("no HTTP submit/
+  verify endpoint"): a KycProfile could previously only be marked VERIFIED
+  by saving one directly through KycProfileRepository (tests or an ad-hoc
+  script).
+
+  Mocked verification: this MVP auto-verifies every submission
+  synchronously (status is VERIFIED immediately in the response) instead of
+  calling a real KYC provider — same spirit as MockExchangeRateProvider /
+  InMemoryComplianceChecker elsewhere in this codebase.
+
+  Two things get written on success:
+    1. A KycProfile row in Postgres (VERIFIED) — this is what
+       ComplianceChecker actually reads when SendRemittanceUseCase checks
+       whether the sender can move an amount above the unverified threshold.
+    2. A "dossier" document in MongoDB (kyc_dossiers collection) — the raw
+       submitted material (documentType, attachments, notes) — non-fatal:
+       if Mongo is unreachable, the KycProfile above still gets saved and
+       this request still succeeds, just without archiving the dossier that
+       time.
+
+  accountId/fullName/documentId are required — attachments/documentType/
+  notes are optional. Resubmitting for the same accountId reuses the same
+  kycProfileId/createdAt rather than creating a second profile (one profile
+  per account, matching the schema's UNIQUE(account_id) constraint).
+
+  Prerequisites (run in order):
+    1. Account / Create Account (Sender)
+    2. Auth / Login
+
+  After running this, Remittance / Send Remittance can move amounts above
+  the 100000 minor-unit unverified-sender threshold without a 403
+  (ComplianceRejectedError).
+}

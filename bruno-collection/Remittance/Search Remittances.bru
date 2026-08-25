@@ -1,0 +1,53 @@
+meta {
+  name: Search Remittances
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/remittances?accountId={{senderAccountId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+}
+
+params:query {
+  accountId: {{senderAccountId}}
+  ~status: COMPLETED
+  ~from: 2026-01-01T00:00:00.000Z
+  ~to: 2026-12-31T23:59:59.999Z
+  ~limit: 20
+}
+
+docs {
+  GET /remittances — the CQRS read side. Reads from Elasticsearch, never
+  from Postgres; matches remittances where `accountId` is either the
+  sender or the recipient.
+
+  accountId is required — omitting it returns 400. There's no per-resource
+  authorization layer yet (see CLAUDE.md), so requiring accountId at least
+  stops this from defaulting to "every remittance in the system."
+
+  Optional filters (all disabled by default above — enable and edit as
+  needed): status (COMPLETED / REJECTED_COMPLIANCE / REJECTED_INSUFFICIENT_FUNDS
+  / FAILED), from/to (ISO 8601 range on createdAt), limit (default 20).
+
+  Eventually consistent: SendRemittanceUseCase publishes remittance.completed
+  to Kafka only after its Postgres transaction commits, and a separate
+  worker process (npm run worker:remittance-indexer) has to actually
+  consume that event and index it into Elasticsearch before it shows up
+  here — there can be a short delay, and nothing shows up at all if that
+  worker isn't running. If this returns an empty list right after "Send
+  Remittance," that worker is either not running or hasn't caught up yet
+  — it's not a bug.
+
+  Prerequisites (run in order):
+    1. Account / Create Account (Sender)
+    2. Auth / Login
+    3. Remittance / Send Remittance — at least once, so there's something
+       to find
+    4. `npm run worker:remittance-indexer` running in a separate terminal
+}

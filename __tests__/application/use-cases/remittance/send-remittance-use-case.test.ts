@@ -7,6 +7,7 @@ import { InMemoryLedgerRepository } from '../../../../src/infra/persistence/in-m
 import { InMemoryRemittanceRepository } from '../../../../src/infra/persistence/in-memory/in-memory-remittance-repository'
 import { InMemoryKycProfileRepository } from '../../../../src/infra/persistence/in-memory/in-memory-kyc-profile-repository'
 import { InMemoryUnitOfWork } from '../../../../src/infra/persistence/in-memory/in-memory-unit-of-work'
+import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
 import { seedTreasuryWallets } from '../../../../src/infra/persistence/in-memory/seed-treasury-wallets'
 import { MockExchangeRateProvider } from '../../../../src/infra/exchange/mock-exchange-rate-provider'
 import { InMemoryComplianceChecker } from '../../../../src/infra/compliance/in-memory-compliance-checker'
@@ -29,6 +30,7 @@ function buildScenario() {
   const ledgerRepository = new InMemoryLedgerRepository()
   const remittanceRepository = new InMemoryRemittanceRepository()
   const kycProfileRepository = new InMemoryKycProfileRepository()
+  const eventPublisher = new InMemoryEventPublisher()
 
   const useCase = new SendRemittanceUseCase(
     walletRepository,
@@ -38,12 +40,13 @@ function buildScenario() {
     new InMemoryComplianceChecker(kycProfileRepository),
     new FlatPercentageFeeCalculator(),
     clock,
-    new InMemoryUnitOfWork()
+    new InMemoryUnitOfWork(),
+    eventPublisher
   )
 
   const openWallet = new OpenWalletUseCase(walletRepository, clock)
 
-  return { walletRepository, ledgerRepository, remittanceRepository, useCase, openWallet, clock }
+  return { walletRepository, ledgerRepository, remittanceRepository, useCase, openWallet, clock, eventPublisher }
 }
 
 async function openAccountWithWallet(openWallet: OpenWalletUseCase, currency: string, initialBalanceMinorUnits = 0) {
@@ -90,6 +93,32 @@ describe('SendRemittanceUseCase', () => {
     }
     expect(netByCurrency.get('USD')).toEqual(0)
     expect(netByCurrency.get('BRL')).toEqual(0)
+  })
+
+  it('publishes a remittance.completed event carrying the committed remittance', async () => {
+    const { walletRepository, useCase, openWallet, eventPublisher } = buildScenario()
+    await seedTreasuryWallets(walletRepository, new SystemClock())
+
+    const senderAccountId = await openAccountWithWallet(openWallet, 'USD', 100_000)
+    const recipientAccountId = await openAccountWithWallet(openWallet, 'BRL', 0)
+
+    const output = await useCase.execute(SendRemittanceInput.from({
+      senderAccountId,
+      recipientAccountId,
+      sourceCurrency: 'USD',
+      destinationCurrency: 'BRL',
+      amountMinorUnits: 10_000,
+    }))
+
+    const publishedEvents = eventPublisher.getPublishedEvents()
+    expect(publishedEvents).toHaveLength(1)
+    expect(publishedEvents[0].topic).toEqual('remittance.completed')
+    expect(publishedEvents[0].payload).toMatchObject({
+      remittanceId: output.remittanceId,
+      senderAccountId,
+      recipientAccountId,
+      status: 'COMPLETED',
+    })
   })
 
   it('should take the same-currency shortcut and leave the destination-side treasury principal untouched', async () => {

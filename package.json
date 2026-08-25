@@ -24,6 +24,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@elastic/elasticsearch": "^9.5.0",
     "@opentelemetry/auto-instrumentations-node": "^0.79.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
     "@opentelemetry/resources": "^2.10.0",
@@ -37,6 +38,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
+    "kafkajs": "^2.2.4",
     "mongodb": "^7.0.0",
     "pg": "^8.16.3",
     "pino": "^10.3.1",
@@ -52,6 +54,7 @@
     "dev:watch": "nodemon --exec ts-node src/main/server.ts",
     "db:migrate": "ts-node src/infra/persistence/postgresql/migrations/run-migrations.ts",
     "worker:account-created": "ts-node src/infra/events/consumers/account-created-consumer.ts",
+    "worker:remittance-indexer": "ts-node src/infra/events/consumers/remittance-completed-indexer.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

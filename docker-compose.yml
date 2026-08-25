@@ -1,13 +1,24 @@
 # Minimal container setup: Postgres and Redis are the two things the app
-# fails fast without (see CLAUDE.md's "What this is"). RabbitMQ is included
-# too, but as a non-fatal dependency — account.created (see src/infra/events/)
-# degrades to "the simulated email doesn't fire" rather than blocking boot or
-# any request if it's unreachable, so app doesn't wait on its healthcheck
-# below. Mongo still exists in the codebase but isn't wired into any request
-# path, so it stays left out here rather than shipped unused. All values
-# below can be overridden either via shell env vars or by dropping a `.env`
-# file next to this compose file (docker compose loads it automatically for
-# variable substitution).
+# fails fast without (see CLAUDE.md's "What this is"). RabbitMQ, Kafka, and
+# Elasticsearch are included too, but as non-fatal dependencies —
+# account.created/remittance.completed (see src/infra/events/) degrade to
+# "the simulated email/search-index update doesn't fire" rather than
+# blocking boot or any write request if they're unreachable; GET
+# /remittances is the only thing that actually needs Elasticsearch. Mongo
+# still exists in the codebase but isn't wired into any request path, so it
+# stays left out here rather than shipped unused.
+#
+# Host-side ports below default away from each service's standard port
+# (6380 not 6379, 5673/15673 not 5672/15672, 9094 not 9092, 9201 not 9200)
+# on purpose — so `docker compose up` here doesn't collide with same-named
+# services you might already have running elsewhere on the host (e.g. a
+# separate local dev stack). The app always talks to these over the compose
+# network on their standard ports regardless (see the `app` service's
+# environment below) — only the host-side mapping is nonstandard.
+#
+# All values below can be overridden either via shell env vars or by
+# dropping a `.env` file next to this compose file (docker compose loads it
+# automatically for variable substitution).
 
 services:
   postgres:
@@ -39,7 +50,7 @@ services:
       # Host-side port only, for connecting a local redis-cli — the app
       # talks to redis over the internal compose network regardless (see
       # REDIS_HOST=redis / REDIS_PORT=6379 below).
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "${REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -55,16 +66,68 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_HOST_PORT:-5673}:5672"
       # Management UI, for poking at queues by hand (see the
       # account.created queue after a signup).
-      - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15672}:15672"
+      - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15673}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 5s
       timeout: 5s
+      retries: 10
+
+  # Single-broker KRaft mode (no Zookeeper) — a dev/demo setup, not a
+  # production cluster. Backs remittance.completed only (see
+  # src/infra/events/kafka-event-publisher.ts).
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      # Advertises the HOST-mapped port (below), not the container's
+      # internal 9092 — a client connecting from the host via
+      # localhost:${KAFKA_HOST_PORT} needs the broker to hand back that same
+      # address on subsequent connections, not the container-internal one.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-9094}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "${KAFKA_HOST_PORT:-9094}:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # Single-node, security disabled — a dev/demo setup. Backs GET
+  # /remittances only (see src/infra/persistence/elasticsearch/).
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTICSEARCH_HOST_PORT:-9201}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 10s
       retries: 10
 
   app:
@@ -76,9 +139,13 @@ services:
       redis:
         condition: service_healthy
       # Not health-gated like postgres/redis above — see the top-of-file
-      # comment on why RabbitMQ being slow to become healthy shouldn't hold
-      # up app startup.
+      # comment on why RabbitMQ/Kafka/Elasticsearch being slow to become
+      # healthy (or unreachable outright) shouldn't hold up app startup.
       rabbitmq:
+        condition: service_started
+      kafka:
+        condition: service_started
+      elasticsearch:
         condition: service_started
     environment:
       PORT: 3000
@@ -94,6 +161,11 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      # kafka:29092 is the internal PLAINTEXT listener (see the kafka
+      # service above) — not kafka:9092, which is only advertised for
+      # host-side clients outside the compose network.
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Mongo/Loki/Tempo are optional at boot (see CLAUDE.md) — left
@@ -123,7 +195,28 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
+  # Separate long-running process consuming remittance.completed and
+  # indexing into Elasticsearch (see src/infra/events/consumers/
+  # remittance-completed-indexer.ts) — same reasoning as
+  # worker-account-created above.
+  worker-remittance-indexer:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/remittance-completed-indexer.ts"]
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_CLIENT_ID: money-across-borders-remittance-indexer
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  kafka_data:
+  elasticsearch_data:

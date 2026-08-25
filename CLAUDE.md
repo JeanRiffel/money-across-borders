@@ -17,7 +17,8 @@ currency's ledger stays balanced independently (see "Cross-currency ledger balan
 **compliance/KYC** check gates how much an unverified sender can move.
 
 End-to-end and reachable over HTTP today: create an account (`POST /account`), log in (`POST /login`),
-open a wallet (`POST /wallets`), and send a remittance (`POST /remittances`). This flow is
+open a wallet (`POST /wallets`), submit KYC (`POST /kyc`), send a remittance (`POST /remittances`), and
+search remittances (`GET /remittances`). This flow is
 **Postgres-backed** (`src/infra/persistence/postgresql/postgres-registry.ts`, wired into every
 `*-factory.ts`) — the app requires a reachable, migrated Postgres to boot at all (`server.ts` fails fast,
 `process.exit(1)`, if the connection check fails). `npm test`'s use-case tests still run entirely against
@@ -35,15 +36,28 @@ stubbed (see "Known inconsistencies" below). Don't assume the whole tree compile
 path is functional; check the specific files you're touching.
 
 Idempotency itself is **not** part of that Postgres-backed flow anymore: `IdempotencyRepository` for
-`account`/`wallet`/`remittance` is now Redis-backed (`src/infra/persistence/redis/`, see the Idempotency
-bullet in Architecture below) — a real, load-bearing dependency, not the dead client it used to be. `server.ts`
-fails fast on an unreachable Redis the same way it does for Postgres. Separately, `CreateAccountUseCase`
-publishes an `account.created` event to RabbitMQ after signup (`src/infra/events/`), consumed by a
-standalone worker process (`npm run worker:account-created`) that simulates sending a confirmation email —
-this is the one thing RabbitMQ is wired to today. Unlike Redis, RabbitMQ stays non-fatal: an unreachable
-broker just means the simulated email doesn't fire for that signup, not that signup fails (see the
-`EventPublisher` bullet in Architecture below). Mongo is still the odd one out — non-fatal connect-and-log
-at boot, nothing else touches it.
+`account`/`wallet`/`remittance`/`kyc` is now Redis-backed (`src/infra/persistence/redis/`, see the
+Idempotency bullet in Architecture below) — a real, load-bearing dependency, not the dead client it used to
+be. `server.ts` fails fast on an unreachable Redis the same way it does for Postgres.
+
+Beyond Postgres/Redis, four more pieces of infra are wired to specific, narrow jobs — all non-fatal at boot,
+none of them a correctness guarantee for the account/wallet/remittance write path itself:
+- **RabbitMQ**: `CreateAccountUseCase` publishes `account.created` after signup (`src/infra/events/`),
+  consumed by a standalone worker (`npm run worker:account-created`) that simulates sending a confirmation
+  email. A task-queue-shaped job — one event, one consumer, no replay needed.
+- **Kafka**: `SendRemittanceUseCase` publishes `remittance.completed` after its transaction commits, consumed
+  by a standalone worker (`npm run worker:remittance-indexer`) that indexes it into Elasticsearch. An
+  event-stream-shaped job instead — a business fact a consumer group can replay, chosen over RabbitMQ for
+  that reason (see the `EventPublisher` bullet in Architecture below for the full reasoning).
+- **Elasticsearch**: backs `GET /remittances` only (`SearchRemittancesUseCase`, CQRS read side) — a
+  denormalized, eventually-consistent projection kept in sync by the Kafka consumer above, never the
+  destination of a write path itself. `RemittanceRepository` (Postgres) remains the source of truth; this
+  index can lag or, if Elasticsearch is down when a request comes in, error — GET /remittances is the only
+  thing that depends on it.
+- **Mongo**: backs `POST /kyc`'s dossier archive only (`MongoKycDossierRepository`, see the `EventPublisher`
+  sibling note below) — the raw submitted material (documents, notes), never the `KycProfile` status
+  `ComplianceChecker` actually reads (that's Postgres). Everything else (account/wallet/remittance) still
+  doesn't touch Mongo.
 
 ## Commands
 
@@ -73,8 +87,11 @@ npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_tr
 npm run worker:account-created # separate process: consumes account.created from RabbitMQ, simulates
                                 # sending a confirmation email (see the Architecture EventPublisher bullet)
 
-docker compose up --build # app + Postgres + Redis + RabbitMQ + the worker above, in containers (see
-                           # "Docker" below); no local install needed
+npm run worker:remittance-indexer # separate process: consumes remittance.completed from Kafka, indexes
+                                   # it into Elasticsearch for GET /remittances
+
+docker compose up --build # app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + both workers
+                           # above, in containers (see "Docker" below); no local install needed
 ```
 
 A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
@@ -82,39 +99,53 @@ A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
 Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `POSTGRES_HOST`/
 `POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `REDIS_HOST`/`REDIS_PORT`/
 `REDIS_PASSWORD` (password optional — unset unless the Redis you're pointing at actually requires one),
-`MONGO_URI`, `RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USER`/`RABBITMQ_PASSWORD`. Postgres and Redis must
-both be reachable before `npm run dev`/`npm start`/`npm run worker:account-created` — run `npm run
+`RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USER`/`RABBITMQ_PASSWORD`, `KAFKA_BROKERS`/`KAFKA_CLIENT_ID`,
+`ELASTICSEARCH_URL`, `MONGO_HOST`/`MONGO_PORT`/`MONGO_USER`/`MONGO_PASSWORD`/`MONGO_DATABASE`. Postgres and
+Redis must both be reachable before `npm run dev`/`npm start`/either `worker:*` script — run `npm run
 db:migrate` once (idempotent, safe to re-run) against a fresh Postgres database first; the server exits
-immediately if either connection check fails (see "What this is" above). RabbitMQ, like Mongo, degrades
-non-fatally if unreachable rather than blocking boot. `npm test` needs none of this — it never touches
-Postgres, Redis, or RabbitMQ. Every config module that reads `process.env.*` (`pg.ts`, `redisClient.ts`,
-`rabbitmq-connection.ts`) calls `dotenv.config()` itself at import time — don't assume an entrypoint has
-already loaded `.env` before importing one; skipping this bit the `worker:account-created` script once
-(RabbitMQ env vars read as `undefined`, connection fell back to `guest:guest@localhost` and failed auth)
-before `rabbitmq-connection.ts` got its own `dotenv.config()` call, matching `pg.ts`'s existing pattern.
-Observability vars (`LOG_LEVEL`, `LOKI_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`) are
-optional — an unreachable Loki/Tempo degrades gracefully rather than blocking boot (see "Observability"
-below).
+immediately if either connection check fails (see "What this is" above). RabbitMQ/Kafka/Elasticsearch/Mongo
+all degrade non-fatally if unreachable rather than blocking boot (see "What this is" above for exactly what
+each backs). `npm test` needs none of this — it never touches Postgres, Redis, RabbitMQ, Kafka,
+Elasticsearch, or Mongo. Every config module that reads `process.env.*` (`pg.ts`, `redisClient.ts`,
+`rabbitmq-connection.ts`, `kafka-connection.ts`, `elasticsearch-client.ts`, `mongo-database.ts`) calls
+`dotenv.config()` itself at import time — don't assume an entrypoint has already loaded `.env` before
+importing one; skipping this bit the `worker:account-created` script once (RabbitMQ env vars read as
+`undefined`, connection fell back to `guest:guest@localhost` and failed auth) before
+`rabbitmq-connection.ts` got its own `dotenv.config()` call, matching `pg.ts`'s existing pattern. Also
+separately: `mongo-database.ts` used to read `MONGO_HOST` directly as if it were a full connection string
+and `MONGO_DB` for the database name — neither var existed anywhere (`.env.example` had `MONGO_URI`;
+`.env` conventionally has `MONGO_HOST` as a bare hostname plus `MONGO_DATABASE`) — now fixed to build the
+connection string from `MONGO_HOST`/`MONGO_PORT`/`MONGO_USER`/`MONGO_PASSWORD` and read `MONGO_DATABASE`,
+matching the HOST/PORT/USER/PASSWORD convention every other service here uses. Observability vars
+(`LOG_LEVEL`, `LOKI_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`) are optional — an unreachable
+Loki/Tempo degrades gracefully rather than blocking boot (see "Observability" below).
 
 ### Docker
 
-`docker compose up --build` runs five services: `postgres`, `redis`, `rabbitmq`, `app`, and
-`worker-account-created`. Mongo is the one intentionally left out — nothing in the current request path
-uses it (see "Known inconsistencies" below), so it isn't simulated just because `.env.example` lists it.
-`docker-entrypoint.sh` runs `npm run db:migrate` before starting the server on every container start, so no
-manual migration step is needed with this path. The `app` service builds from the repo's `Dockerfile`
-(multi-stage, `ts-node` + `tsconfig-paths` at runtime — no separate `tsc` build step, since several files
-import via the `src/...` baseUrl alias that plain compiled JS wouldn't resolve); `worker-account-created`
-reuses the same image but overrides `entrypoint:` to run the consumer script directly, bypassing
-`docker-entrypoint.sh` (which always runs migrations + the HTTP server regardless of `CMD`, so it can't be
-reused for a different process as-is). `app` depends on `postgres` and `redis` being healthy before
-starting (both are fatal-if-unreachable, see "What this is" above) but only on `rabbitmq` having *started*
-— not healthy — since an unreachable broker is non-fatal and shouldn't hold up boot. Postgres/Redis/
-RabbitMQ are reachable from the host at `localhost:55432`/`localhost:6379`/`localhost:5672` (Postgres on a
-non-default port to avoid clashing with a locally-running one; RabbitMQ's management UI is also exposed at
-`localhost:15672`); the app itself talks to all three over the compose network (`postgres:5432`,
-`redis:6379`, `rabbitmq:5672`). This is still a deliberately minimal setup, not the multi-node NGINX +
-full-stack one the README describes — see the next bullet in "Known inconsistencies" for that gap.
+`docker compose up --build` runs eight services: `postgres`, `redis`, `rabbitmq`, `kafka`, `elasticsearch`,
+`app`, `worker-account-created`, and `worker-remittance-indexer`. Mongo is the one intentionally left out —
+nothing in the current request path *requires* it (see "What this is" above: `POST /kyc` degrades to
+"dossier not archived" without it, same as RabbitMQ/Kafka/Elasticsearch degrade without theirs), so it isn't
+simulated just because `.env.example` lists it. `docker-entrypoint.sh` runs `npm run db:migrate` before
+starting the server on every container start, so no manual migration step is needed with this path. The
+`app` service builds from the repo's `Dockerfile` (multi-stage, `ts-node` + `tsconfig-paths` at runtime — no
+separate `tsc` build step, since several files import via the `src/...` baseUrl alias that plain compiled JS
+wouldn't resolve); both `worker-*` services reuse the same image but override `entrypoint:` to run their
+consumer script directly, bypassing `docker-entrypoint.sh` (which always runs migrations + the HTTP server
+regardless of `CMD`, so it can't be reused for a different process as-is). `app` depends on `postgres` and
+`redis` being healthy before starting (both are fatal-if-unreachable, see "What this is" above) but only on
+`rabbitmq`/`kafka`/`elasticsearch` having *started* — not healthy — since all three are non-fatal and
+shouldn't hold up boot.
+
+Host-side ports default away from each service's standard port (`6380` not `6379`, `5673`/`15673` not
+`5672`/`15672`, `9094` not `9092`, `9201` not `9200`) so `docker compose up` here doesn't collide with a
+same-named service you might already have running elsewhere on the host (e.g. a separate local dev
+stack) — the app always talks to these over the compose network on their standard ports regardless
+(`postgres:5432`, `redis:6379`, `rabbitmq:5672`, `kafka:29092` — not `kafka:9092`, that listener is only
+advertised for host-side clients outside the compose network — and `elasticsearch:9200`). Postgres alone
+predates this convention with its own non-standard host port (`localhost:55432`), for the same reason. This
+is still a deliberately minimal setup, not the multi-node NGINX + full-stack one the README describes — see
+the next bullet in "Known inconsistencies" for that gap.
 
 ## Architecture
 
@@ -139,25 +170,31 @@ src/
  ├── domain/<context>/         entities, value-objects, repository interfaces (ports) — no framework deps
  │    ├── ledger/services/     LedgerService — first domain service in the codebase (needs a port, LedgerRepository)
  │    └── shared/              cross-context domain: Clock, errors.ts, Money/Currency value objects
- ├── application/<context>/    use cases + DTOs, orchestrate domain objects
+ ├── application/<context>/    use cases + DTOs, orchestrate domain objects (now includes compliance/ —
+ │    │                        SubmitKycUseCase, dto/, and its own repositories/ for KycDossierRepository,
+ │    │                        the first context-scoped repositories/ folder alongside the top-level one)
  │    ├── repositories/        ports the application layer depends on (e.g. IdempotencyRepository)
  │    └── shared/              cross-cutting ports: authentication, idempotency, security, exchange, compliance,
  │                              pricing, transaction (UnitOfWork), events (EventPublisher)
  ├── infra/                    concrete adapters implementing domain/application ports
  │    ├── authentication/      JWTService (implements TokenGenerator + TokenVerifier)
  │    ├── config/database/     Postgres pool (+ transaction context, see below), Mongo singleton, Redis
- │    │                        client (Strategy pattern via DatabaseStrategy/DatabaseContext — Mongo only,
- │    │                        see below) — pg.ts, redisClient.ts, and message-broker/rabbitmq-connection.ts
- │    │                        (below) all call dotenv.config() themselves; see the Commands section
- │    ├── config/message-broker/ rabbitmq-connection.ts — the real, used connection module. Its sibling
- │    │                        rabbitmq-producer.ts/rabbitmq-consumer.ts are dead, pre-pivot leftovers that
- │    │                        don't even compile (import domain/transaction/... paths that no longer exist)
- │    │                        — the actual producer/consumer live in events/ below, not here
+ │    │                        client, Elasticsearch client (Strategy pattern via DatabaseStrategy/
+ │    │                        DatabaseContext — Mongo only, see below) — pg.ts, redisClient.ts,
+ │    │                        elasticsearch-client.ts, mongo-database.ts, and message-broker/{rabbitmq,
+ │    │                        kafka}-connection.ts all call dotenv.config() themselves; see Commands
+ │    ├── config/message-broker/ rabbitmq-connection.ts and kafka-connection.ts — the real, used connection
+ │    │                        modules. rabbitmq-connection.ts's siblings rabbitmq-producer.ts/
+ │    │                        rabbitmq-consumer.ts are dead, pre-pivot leftovers that don't even compile
+ │    │                        (import domain/transaction/... paths that no longer exist) — the actual
+ │    │                        producer/consumers live in events/ below, not here
  │    ├── events/               EventPublisher adapters: InMemoryEventPublisher (records published events,
- │    │                        used in tests), RabbitMQEventPublisher (real — never throws, logs+swallows
- │    │                        its own connect/publish failures). consumers/account-created-consumer.ts is a
- │    │                        separate long-running process (npm run worker:account-created), not part of
- │    │                        buildApp()
+ │    │                        used in tests), RabbitMQEventPublisher + KafkaEventPublisher (real — never
+ │    │                        throw, log+swallow their own connect/publish failures; see the EventPublisher
+ │    │                        bullet below for which use case gets which). consumers/ holds two separate
+ │    │                        long-running processes — account-created-consumer.ts (npm run
+ │    │                        worker:account-created) and remittance-completed-indexer.ts (npm run
+ │    │                        worker:remittance-indexer) — neither is part of buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
  │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
@@ -166,15 +203,18 @@ src/
  │    ├── persistence/         postgresql/ (the repos every factory wires to for everything except
  │    │                        idempotency, plus postgres-registry.ts, postgres-unit-of-work.ts, and
  │    │                        migrations/), redis/ (RedisIdempotencyRepository + redis-registry.ts — what
- │    │                        account/wallet/remittance factories wire idempotencyRepository to instead,
- │    │                        see the Idempotency bullet below), in-memory/ (what tests construct directly
- │    │                        instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
+ │    │                        account/wallet/remittance/kyc factories wire idempotencyRepository to
+ │    │                        instead, see the Idempotency bullet below), elasticsearch/
+ │    │                        (ElasticsearchRemittanceSearchIndex — GET /remittances's read model),
+ │    │                        mongodb/ (MongoKycDossierRepository — POST /kyc's dossier archive, the first
+ │    │                        real Mongo consumer in this codebase), in-memory/ (what tests construct
+ │    │                        directly instead — in-memory-registry.ts + in-memory-unit-of-work.ts)
  │    ├── security/            BcryptPasswordHasher
  │    └── time/                SystemClock
  ├── interfaces/http/          Express-facing layer: controllers, routes, middlewares
  └── main/                     composition root: server.ts bootstraps Express + DI; <context>-module.ts
-                                (e.g. account-module.ts, wallet-module.ts, remittance-module.ts) builds a
-                                use case from injected dependencies
+                                (e.g. account-module.ts, wallet-module.ts, remittance-module.ts,
+                                compliance-module.ts) builds a use case from injected dependencies
 ```
 
 Key patterns to follow when extending this code:
@@ -189,8 +229,9 @@ Key patterns to follow when extending this code:
   every keyless request would collide on the same cache entry). Note `InMemoryIdempotencyRepository
   .findByKey` resolves to the cached **response value directly** (see its test), not a wrapping
   `{key, response}` record — `IdempotentDecorator` reads it as `existing as O`, not `existing.response`.
-  `account-factory.ts`/`wallet-factory.ts`/`remittance-factory.ts` wire `idempotencyRepository` to
-  `RedisIdempotencyRepository` (`infra/persistence/redis/`) now, not Postgres: `claim()` is `SET key
+  `account-factory.ts`/`wallet-factory.ts`/`remittance-factory.ts`/`compliance-factory.ts` wire
+  `idempotencyRepository` to `RedisIdempotencyRepository` (`infra/persistence/redis/`) now, not Postgres:
+  `claim()` is `SET key
   IN_FLIGHT NX EX <30s>` (the same atomic reservation the Postgres adapter gets from its `UNIQUE`
   constraint), `save()` overwrites with the response under a 24h TTL, and `release()` uses a Lua
   check-and-delete script so it can never clobber a response a concurrent `save()` already wrote.
@@ -232,17 +273,41 @@ Key patterns to follow when extending this code:
   concurrent-debit race safety, which would need it.
 - **`EventPublisher`** (`application/shared/events/event-publisher.ts`) publishes a domain event — a topic
   string + a plain payload — with a contract deliberately weaker than `UnitOfWork`'s: implementations
-  **must not throw**. Every event published through it so far (`CreateAccountUseCase` → `account.created`,
-  after `accountRepository.save()`) is a best-effort side effect, not a correctness guarantee — unlike a
-  ledger write, losing one occasionally is acceptable, so a signup should never fail because the broker is
-  down. `RabbitMQEventPublisher` (`infra/events/`) catches and logs its own connect/publish failures rather
-  than propagating them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in
-  an array). `CreateAccountUseCase` takes its `EventPublisher` as a required constructor arg, same as
-  `SendRemittanceUseCase` takes its `UnitOfWork` — no default, so every construction site (factory, test)
-  is explicit about which adapter it's using. The consumer side
-  (`infra/events/consumers/account-created-consumer.ts`) is a separate long-running process — run it with
-  `npm run worker:account-created` — that logs a simulated "confirmation email sent" line per event and
-  acks; nothing about `account.created` publishing depends on that consumer being up.
+  **must not throw**. Every event published through it is a best-effort side effect, not a correctness
+  guarantee — unlike a ledger write, losing one occasionally is acceptable. Two producers exist, each on a
+  different broker, deliberately — the broker is picked per event based on how it's meant to be consumed,
+  not "whichever queue already exists":
+    - `CreateAccountUseCase` → `account.created` (after `accountRepository.save()`) → `RabbitMQEventPublisher`.
+      Task-queue-shaped: one event, one consumer (the simulated-email worker), no reason to replay it later.
+    - `SendRemittanceUseCase` → `remittance.completed` (after `unitOfWork.runInTransaction()` resolves — see
+      the `UnitOfWork` bullet above; published outside the transaction on purpose, so a remittance that ends
+      up rolled back can never have already announced itself as completed) → `KafkaEventPublisher`.
+      Event-stream-shaped: a business fact a consumer group can replay, and plausibly more than one
+      consumer wants over time (today: the Elasticsearch indexer; analytics/audit are the obvious next
+      ones) — Kafka's retention/replay model fits that, RabbitMQ's work-queue model doesn't.
+
+  Both adapters (`infra/events/`) catch and log their own connect/publish failures rather than propagating
+  them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in an array).
+  `CreateAccountUseCase`/`SendRemittanceUseCase` take their `EventPublisher` as a required constructor arg,
+  same as `SendRemittanceUseCase` takes its `UnitOfWork` — no default, so every construction site (factory,
+  test) is explicit about which adapter it's using. Two separate consumer processes exist in
+  `infra/events/consumers/`, neither part of `buildApp()`:
+    - `account-created-consumer.ts` (`npm run worker:account-created`) logs a simulated "confirmation email
+      sent" line per event and acks.
+    - `remittance-completed-indexer.ts` (`npm run worker:remittance-indexer`) indexes each event into
+      Elasticsearch via `ElasticsearchRemittanceSearchIndex` (`infra/persistence/elasticsearch/`) — catches
+      and logs its own indexing failures rather than crashing the consumer (same best-effort posture as
+      `EventPublisher` itself), so a bad message is dropped, not retried forever.
+
+  `GET /remittances` (`SearchRemittancesUseCase`) is the CQRS read side these two feed: it reads from
+  Elasticsearch only, never Postgres, via `RemittanceSearchIndex`
+  (`application/remittance/repositories/remittance-search-index.ts`) — a **different** contract than
+  `EventPublisher`'s: `search()` is allowed to throw (a failed search should surface as a real error, there's
+  no meaningful silent-empty-result), unlike `publish()`. The index/mapping (`remittances`, all string
+  fields `keyword`, `createdAt` a `date`) is created lazily on first `index()`/`search()` call — no formal
+  migration runner for it, unlike Postgres. `accountId` is a required query param on the HTTP side (matches
+  either sender or recipient) — there's no per-resource authorization layer yet (see below), so requiring it
+  at least stops the endpoint from defaulting to "every remittance in the system."
 - **Observability** (`infra/observability/`): `logger.ts` is a single shared Pino logger, replacing scattered
   `console.*` calls across `infra/config/**` — always logs pretty to stdout, and additionally ships
   structured logs to Loki when `LOKI_URL` is set; Pino transports run in worker threads and `pino-loki`
@@ -254,8 +319,8 @@ Key patterns to follow when extending this code:
   OpenTelemetry auto-instrumentation exporting OTLP/HTTP traces to Tempo; it's imported as the very first
   line of `src/main/server.ts`, ahead of every other import, because auto-instrumentation monkey-patches
   modules (express, http, pg, ...) at `require()` time and has to run before anything it instruments gets
-  imported. Like Mongo (see below), a failed/unreachable Loki or Tempo is non-fatal — only the Postgres
-  check inside `buildApp()` blocks boot.
+  imported. Like Mongo/RabbitMQ/Kafka/Elasticsearch (see below), a failed/unreachable Loki or Tempo is
+  non-fatal — only the Postgres and Redis checks inside `buildApp()` block boot.
 - **Cross-currency ledger balancing**: a single transaction can't balance directly across two currencies.
   System-owned **treasury wallets** (one per supported currency, owned by the reserved
   `TREASURY_ACCOUNT_ID` in `domain/wallet/treasury-account.ts`, seeded via `seed-treasury-wallets.ts`) act
@@ -268,7 +333,10 @@ Key patterns to follow when extending this code:
   `DatabaseContext` as the (currently unused) strategy holder; see `mongo-database-sigleton.ts` for the
   actual Mongo singleton usage (filename typo is existing, not yet renamed) — it calls `MongoDatabase
   .connect()` directly, not through `DatabaseContext`. Mongo connection failure at startup is logged, not
-  fatal — nothing in the account/wallet/remittance flow touches it. Postgres deliberately does **not**
+  fatal — account/wallet/remittance still don't touch it; `POST /kyc`'s dossier archive
+  (`MongoKycDossierRepository`, see the `EventPublisher` bullet's sibling note above) is the first thing
+  that does, and it degrades the same way (dossier not archived, KycProfile save in Postgres unaffected).
+  Postgres deliberately does **not**
   follow this pattern: `pg.ts` exports a bare `pool` (`pg.Pool` already manages its own connection
   lifecycle) plus a `getExecutor()` helper for transaction-awareness (see the `UnitOfWork` bullet above) —
   no `PostgresDatabase implements DatabaseStrategy<Pool>` wrapper exists, since nothing needed the
@@ -297,21 +365,28 @@ Key patterns to follow when extending this code:
   updated for the cross-border pivot; the rest was not. Trust this file and the actual tree over the
   README's body.
 - Postgres persistence is functional (`account-factory.ts`, `wallet-factory.ts`, `remittance-factory.ts`,
-  `user-factory.ts` all wire to `postgres-registry.ts` for everything except idempotency — see Architecture
-  above); Mongo persistence is still not — nothing in this slice touches it beyond the non-fatal
-  connect-and-log at boot. `npm test` uses the `InMemory*` implementations directly, never Postgres, Redis,
-  or RabbitMQ.
-- A `docker-compose.yml` now covers Postgres, Redis, RabbitMQ, the app, and the `account.created` worker
-  (see "Docker" above), but it's still not the multi-node NGINX load balancing + Mongo stack the README's
-  "Running Locally" section describes — that fuller setup (NGINX, multiple API instances, Mongo) is still
-  not present in the repo. Outside Docker, Postgres/Redis/RabbitMQ are whatever `POSTGRES_HOST`/`REDIS_HOST`/
-  `RABBITMQ_HOST`/etc. in `.env` point at, started/managed outside this repo.
+  `user-factory.ts`, `compliance-factory.ts` all wire to `postgres-registry.ts` for everything except
+  idempotency — see Architecture above); Mongo persistence is now functional too, but narrowly — only
+  `MongoKycDossierRepository` touches it (see the `EventPublisher`/Mongo bullets above); nothing else does.
+  `npm test` uses the `InMemory*` implementations directly, never Postgres, Redis, RabbitMQ, Kafka,
+  Elasticsearch, or Mongo.
+- A `docker-compose.yml` now covers Postgres, Redis, RabbitMQ, Kafka, Elasticsearch, the app, and both
+  `worker-*` services (see "Docker" above), but it's still not the multi-node NGINX load balancing + Mongo
+  stack the README's "Running Locally" section describes — that fuller setup (NGINX, multiple API
+  instances, Mongo as a compose service) is still not present in the repo (Mongo runs outside Docker for
+  this project, whatever `MONGO_HOST`/etc. in `.env` point at). Outside Docker, every one of
+  Postgres/Redis/RabbitMQ/Kafka/Elasticsearch/Mongo is whatever its own `*_HOST`/etc. vars in `.env` point
+  at, started/managed outside this repo.
 - The compliance/KYC gate (`InMemoryComplianceChecker` — the name is legacy, it's a mocked business-rule
   checker, not an in-memory *store*; it takes whatever `KycProfileRepository` it's constructed with, and is
-  wired to the Postgres one via `remittance-factory.ts`) has no HTTP submit/verify endpoint — a
-  `KycProfile` can only be marked `VERIFIED` by saving one directly through `KycProfileRepository` (tests
-  or an ad-hoc script), not through the API. Below the fixed unverified-sender threshold, remittances work
-  without one.
+  wired to the Postgres one via `remittance-factory.ts`) now has an HTTP submit endpoint (`POST /kyc`, see
+  the `EventPublisher` bullet's Mongo sibling note above) — this used to be a documented gap ("no HTTP
+  submit/verify endpoint... a KycProfile can only be marked VERIFIED by saving one directly through
+  KycProfileRepository") and no longer is. `SubmitKycUseCase` auto-verifies every submission synchronously
+  rather than calling a real KYC provider — same mocked-and-immediate spirit as `MockExchangeRateProvider`/
+  `InMemoryComplianceChecker` itself; there's still no separate async "verify" step or a way to reject a
+  submission. Below the fixed unverified-sender threshold, remittances still work without submitting KYC at
+  all.
 - FX rates (`MockExchangeRateProvider`) are a static table, not a live feed; the compliance threshold is
   applied in raw source-currency minor units, not FX-normalized; and treasury wallets are seeded once with
   a large fixed balance (`migrations/002_seed_treasury_wallets.sql`) rather than continuously rebalanced —
@@ -337,7 +412,18 @@ token-issuance endpoint at all, so `/wallets`/`/remittances` needed a JWT minted
 `PasswordHasher.compare` and returning a normal server-issued token. Also: every `Postgres*Repository`
 used to be a stub and every `*-factory.ts` wired to the in-memory registry regardless — the app now
 requires and uses real Postgres (see "What this is" and the Architecture bullets above); only `npm test`
-still runs against the in-memory repos.
+still runs against the in-memory repos. Also: `redisClient.ts` and `rabbitmq-connection.ts` both used to
+read `process.env.*` without ever calling `dotenv.config()` themselves, relying on their entrypoint having
+loaded `.env` first — `server.ts` happened to (via an earlier import in the same chain, for Redis), but the
+standalone `worker:account-created` script didn't, so `RABBITMQ_HOST`/etc. silently read as `undefined`
+until `rabbitmq-connection.ts` got its own `dotenv.config()` call, matching `pg.ts`'s existing pattern (see
+Commands above); `redisClient.ts` got the same fix preemptively, since it only worked by the same kind of
+import-order luck. And: `mongo-database.ts` used to pass `process.env.MONGO_HOST` straight to `new
+MongoClient(...)` as if it were a full connection string, and read `process.env.MONGO_DB` for the database
+name — neither var existed anywhere (see the Mongo bug note above) — fixed to build the connection string
+from `MONGO_HOST`/`MONGO_PORT`/`MONGO_USER`/`MONGO_PASSWORD` and read `MONGO_DATABASE`, matching every other
+service's HOST/PORT/USER/PASSWORD convention. Both were non-fatal, so both were silently broken rather than
+loudly, for a while.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.

@@ -1,0 +1,9 @@
+meta {
+  name: Compliance
+}
+
+docs {
+  Requires `jwt_token` in the environment — run Auth / Login first (after
+  Account / Create Account (Sender)). Every request in this folder sends
+  `Authorization: Bearer {{jwt_token}}`.
+}

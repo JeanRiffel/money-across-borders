@@ -9,15 +9,18 @@ import { MongoDatabaseSingleton } from "../infra/config/database/mongo-database-
 import { accountRouter } from "../interfaces/http/routes/account/routes"
 import { walletRouter } from "../interfaces/http/routes/wallet/routes"
 import { remittanceRouter } from "../interfaces/http/routes/remittance/routes"
+import { complianceRouter } from "../interfaces/http/routes/compliance/routes"
 import { userRouter } from "../interfaces/http/routes/user/routes"
 import { CreateAccountController } from "../interfaces/http/controllers/create-account.controller"
 import { OpenWalletController } from "../interfaces/http/controllers/open-wallet.controller"
 import { SendRemittanceController } from "../interfaces/http/controllers/send-remittance.controller"
 import { SearchRemittancesController } from "../interfaces/http/controllers/search-remittances.controller"
+import { SubmitKycController } from "../interfaces/http/controllers/submit-kyc.controller"
 import { LoginController } from "../interfaces/http/controllers/login.controller"
 import { createAccountUseCase } from "src/infra/factories/account-factory"
 import { createOpenWalletUseCase } from "src/infra/factories/wallet-factory"
 import { createSendRemittanceUseCase, createSearchRemittancesUseCase } from "src/infra/factories/remittance-factory"
+import { createSubmitKycUseCase } from "src/infra/factories/compliance-factory"
 import { createLoginUseCase } from "src/infra/factories/user-factory"
 import { createJWTService } from "../infra/factories/jwt-factory"
 import { pool } from "../infra/config/database/postgresql/pg"
@@ -47,14 +50,16 @@ export const buildApp = async (): Promise<Express> => {
     return res.send(await register.metrics())
   })
 
-  // None of this slice's routes (account/wallet/remittance) touch Mongo —
-  // everything is wired to the in-memory registry — so a missing/unreachable
-  // Mongo instance is logged, not fatal.
+  // account/wallet/remittance don't touch Mongo, but POST /kyc now does
+  // (see mongo-kyc-dossier-repository.ts) — still non-fatal here, though:
+  // MongoKycDossierRepository catches its own failures (see its comment),
+  // so a missing/unreachable Mongo degrades to "the dossier isn't
+  // archived," not a boot failure.
   try {
     await MongoDatabaseSingleton.getInstance()
     logger.info('✓ Database connection established')
   } catch (error) {
-    logger.warn({ error }, '⚠ MongoDB unavailable, continuing without it (not used by this slice)')
+    logger.warn({ error }, '⚠ MongoDB unavailable, continuing without it (POST /kyc will just skip archiving the dossier)')
   }
 
   // Unlike Mongo above, Postgres IS the source of truth for the
@@ -105,6 +110,9 @@ export const buildApp = async (): Promise<Express> => {
 
   const walletModule = createOpenWalletUseCase()
   app.use(walletRouter(new OpenWalletController(walletModule), jwtService))
+
+  const submitKycModule = createSubmitKycUseCase()
+  app.use(complianceRouter(new SubmitKycController(submitKycModule), jwtService))
 
   const remittanceModule = await createSendRemittanceUseCase()
   const searchRemittancesModule = createSearchRemittancesUseCase()

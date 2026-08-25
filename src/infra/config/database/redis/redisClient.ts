@@ -1,5 +1,18 @@
 import { createClient } from "redis";
+import dotenv from "dotenv";
 import { logger } from "../../../observability/logger";
+
+// Self-contained on purpose, matching pg.ts's exact rationale: process.env
+// is read eagerly below (host/port/password are module-level consts), so
+// this can't assume its entrypoint already called dotenv.config() first.
+// This happened to work via server.ts only because another import earlier
+// in the same chain (pg.ts, via postgres-registry.ts) calls dotenv.config()
+// itself first — incidental import order, not a guarantee, and exactly the
+// bug that hit rabbitmq-connection.ts when the worker: npm script (a
+// separate process with no such earlier import) read RABBITMQ_HOST/PORT/
+// USER/PASSWORD as undefined. dotenv.config() is safe to call more than
+// once (later calls don't override already-set vars).
+dotenv.config();
 
 // REDIS_HOST/REDIS_PORT/REDIS_PASSWORD, matching the HOST/PORT/PASSWORD
 // convention every other service in .env(.example) already uses

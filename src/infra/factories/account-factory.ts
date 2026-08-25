@@ -5,6 +5,7 @@ import { CreateAccountOutput } from "src/application/account/dto/create-account-
 import { BcryptPasswordHasher } from "../security/bycrypt-password-hasher";
 import { postgresRegistry } from "../persistence/postgresql/postgres-registry";
 import { redisRegistry } from "../persistence/redis/redis-registry";
+import { RabbitMQEventPublisher } from "../events/rabbitmq-event-publisher";
 
 export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccountOutput> {
   const dependencies = {
@@ -16,7 +17,13 @@ export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccoun
     // shared client this wraps is connected despite this factory itself
     // staying synchronous.
     idempotencyRepository: redisRegistry.idempotencyRepository,
-    passwordHasher: new BcryptPasswordHasher()
+    passwordHasher: new BcryptPasswordHasher(),
+    // Publishes account.created to RabbitMQ (see account-created-consumer.ts
+    // for the "simulated confirmation email" side) — unlike Redis above,
+    // an unreachable broker here is non-fatal: RabbitMQEventPublisher
+    // swallows its own connection/publish failures (see its comment), so
+    // this factory doesn't need to await any connection check.
+    eventPublisher: new RabbitMQEventPublisher()
   }
 
   return buildAccountModule(dependencies)

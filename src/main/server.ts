@@ -11,6 +11,7 @@ import { walletRouter } from "../interfaces/http/routes/wallet/routes"
 import { remittanceRouter } from "../interfaces/http/routes/remittance/routes"
 import { complianceRouter } from "../interfaces/http/routes/compliance/routes"
 import { userRouter } from "../interfaces/http/routes/user/routes"
+import { mountSwagger } from "../interfaces/http/docs/swagger"
 import { CreateAccountController } from "../interfaces/http/controllers/create-account.controller"
 import { OpenWalletController } from "../interfaces/http/controllers/open-wallet.controller"
 import { SendRemittanceController } from "../interfaces/http/controllers/send-remittance.controller"
@@ -49,6 +50,11 @@ export const buildApp = async (): Promise<Express> => {
     res.set('Content-Type', register.contentType)
     return res.send(await register.metrics())
   })
+
+  // Interactive OpenAPI docs, generated from the @openapi JSDoc blocks in
+  // interfaces/http/routes/*/routes.ts — see docs/swagger.ts. Unauthenticated
+  // like /health and /metrics above: it's API documentation, not a secret.
+  mountSwagger(app)
 
   // account/wallet/remittance don't touch Mongo, but POST /kyc now does
   // (see mongo-kyc-dossier-repository.ts) — still non-fatal here, though:

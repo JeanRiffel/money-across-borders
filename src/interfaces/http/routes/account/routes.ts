@@ -12,6 +12,45 @@ const accountRouter = (
 
   const router = Router()
 
+  /**
+   * @openapi
+   * /account:
+   *   post:
+   *     summary: Create an account (signup)
+   *     description: >
+   *       Provisions a User (credentials) and an Account (financial/ledger
+   *       relationship) together. Not behind authMiddleware — there's no way
+   *       to have a token before signing up.
+   *     tags: [Account]
+   *     parameters:
+   *       - $ref: '#/components/parameters/IdempotencyKeyHeader'
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/CreateAccountInput'
+   *     responses:
+   *       201:
+   *         description: Account created.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 statusCode: { type: integer, example: 201 }
+   *                 result: { $ref: '#/components/schemas/CreateAccountOutput' }
+   *       409:
+   *         description: An account with this email already exists.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+   *       500:
+   *         description: Unexpected error.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+   */
   router.post('/account', async(req: Request, res: Response) => {
     try {
       const result = await controller.handle(req)

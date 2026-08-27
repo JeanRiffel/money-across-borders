@@ -2,11 +2,11 @@ export class EntryDirection {
   constructor(private id: number) {}
 
   static debit(): EntryDirection {
-    return new EntryDirection(1)
+    return new EntryDirection(1);
   }
 
   static credit(): EntryDirection {
-    return new EntryDirection(2)
+    return new EntryDirection(2);
   }
 
   getId(): number {
@@ -14,11 +14,11 @@ export class EntryDirection {
   }
 
   isDebit(): boolean {
-    return this.id === 1
+    return this.id === 1;
   }
 
   isCredit(): boolean {
-    return this.id === 2
+    return this.id === 2;
   }
 
   toJSON() {

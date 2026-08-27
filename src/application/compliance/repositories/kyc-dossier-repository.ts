@@ -1,7 +1,7 @@
 export type KycDossierAttachment = {
-  label: string
-  reference: string
-}
+  label: string;
+  reference: string;
+};
 
 // Deliberately loose compared to KycProfile (a strict domain entity with
 // private fields and get*() accessors) — this is the shape Mongo is good
@@ -12,15 +12,15 @@ export type KycDossierAttachment = {
 // this is supporting material, an audit/reference archive, not a source of
 // truth for any business rule.
 export type KycDossier = {
-  kycProfileId: string
-  accountId: string
-  fullName: string
-  documentId: string
-  documentType?: string
-  attachments: KycDossierAttachment[]
-  notes?: string
-  submittedAt: string
-}
+  kycProfileId: string;
+  accountId: string;
+  fullName: string;
+  documentId: string;
+  documentType?: string;
+  attachments: KycDossierAttachment[];
+  notes?: string;
+  submittedAt: string;
+};
 
 export interface KycDossierRepository {
   // Never throws — see MongoKycDossierRepository's comment. Archiving the
@@ -28,5 +28,5 @@ export interface KycDossierRepository {
   // Mongo can't undo the KycProfile save SubmitKycUseCase already made in
   // Postgres, matching how Mongo has been non-fatal everywhere else in
   // this codebase (see server.ts).
-  save(dossier: KycDossier): Promise<void>
+  save(dossier: KycDossier): Promise<void>;
 }

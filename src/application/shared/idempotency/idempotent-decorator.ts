@@ -1,16 +1,15 @@
-import { UseCase } from "./common-use-case.";
-import { IdempotencyRepository } from "../../repositories/idempotency-repository";
-import { IdempotencyKeyInFlightError } from "../../../domain/shared/errors";
+import { UseCase } from './common-use-case.';
+import { IdempotencyRepository } from '../../repositories/idempotency-repository';
+import { IdempotencyKeyInFlightError } from '../../../domain/shared/errors';
 
-export class IdempotentDecorator<I, O> implements UseCase<I, O>{
-
+export class IdempotentDecorator<I, O> implements UseCase<I, O> {
   constructor(
     private useCase: UseCase<I, O>,
     private idempotencyRepository: IdempotencyRepository
-  ){}
+  ) {}
 
-  async execute(input: any): Promise<O>{
-    const key = input.idempotencyKey
+  async execute(input: any): Promise<O> {
+    const key = input.idempotencyKey;
 
     // claim() is the real concurrency gate (an atomic reservation, backed by
     // the idempotency_records.key UNIQUE constraint on Postgres) — a plain
@@ -18,7 +17,7 @@ export class IdempotentDecorator<I, O> implements UseCase<I, O>{
     // Idempotency-Key both slip past the check before either had saved a
     // response, so both fully executed the wrapped use case (e.g. two
     // committed remittances for what the client believed was one request).
-    const claimed = await this.idempotencyRepository.claim(key)
+    const claimed = await this.idempotencyRepository.claim(key);
     if (!claimed) {
       // Someone else holds this key already. If they've finished, replay
       // their response. If not, fail closed rather than risk re-running a
@@ -33,22 +32,22 @@ export class IdempotentDecorator<I, O> implements UseCase<I, O>{
       // hit; this was never caught because no controller exercised this path
       // end-to-end until the account/wallet/remittance controllers were
       // wired up.
-      const existing = await this.idempotencyRepository.findByKey(key)
+      const existing = await this.idempotencyRepository.findByKey(key);
       if (existing) {
-        return existing as O
+        return existing as O;
       }
-      throw new IdempotencyKeyInFlightError(key)
+      throw new IdempotencyKeyInFlightError(key);
     }
 
     try {
-      const result = await this.useCase.execute(input)
+      const result = await this.useCase.execute(input);
 
       await this.idempotencyRepository.save({
         key,
-        response: result
-      } as any)
+        response: result,
+      } as any);
 
-      return result
+      return result;
     } catch (error) {
       // Release the reservation so a retry with the same key (e.g. after a
       // definitive business-rule rejection like insufficient funds) isn't
@@ -58,9 +57,8 @@ export class IdempotentDecorator<I, O> implements UseCase<I, O>{
       // see it as still in flight (IdempotencyKeyInFlightError) rather than
       // silently re-executing. That's the deliberate trade-off: fail closed,
       // not double-spend.
-      await this.idempotencyRepository.release(key)
-      throw error
+      await this.idempotencyRepository.release(key);
+      throw error;
     }
   }
-
 }

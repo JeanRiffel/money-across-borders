@@ -1,4 +1,4 @@
-import { Wallet } from '../../../domain/wallet/entities/wallet'
+import { Wallet } from '../../../domain/wallet/entities/wallet';
 
 export class OpenWalletOutput {
   constructor(
@@ -18,6 +18,6 @@ export class OpenWalletOutput {
       wallet.getBalance().getAmountMinorUnits(),
       wallet.getStatus().getDescription(),
       wallet.getCreatedAt().toISOString()
-    )
+    );
   }
 }

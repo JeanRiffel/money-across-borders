@@ -1,4 +1,4 @@
-import { KycProfile } from "../../../domain/compliance/entities/kyc-profile"
+import { KycProfile } from '../../../domain/compliance/entities/kyc-profile';
 
 export class SubmitKycOutput {
   constructor(
@@ -16,6 +16,6 @@ export class SubmitKycOutput {
       profile.getStatus().getDescription(),
       profile.getVerifiedAt()?.toISOString() ?? null,
       profile.getCreatedAt().toISOString()
-    )
+    );
   }
 }

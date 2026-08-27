@@ -1,12 +1,12 @@
-import { PostgresAccountRepository } from "./postgres-account-repository"
-import { PostgresUserRepository } from "./postgres-user-repository"
-import { PostgresWalletRepository } from "./postgres-wallet-repository"
-import { PostgresLedgerRepository } from "./postgres-ledger-repository"
-import { PostgresRemittanceRepository } from "./postgres-remittance-repository"
-import { PostgresKycProfileRepository } from "./postgres-kyc-profile-repository"
-import { PostgresIdempotencyRepository } from "./postgres-idempotency-repository"
-import { PostgresOutboxRepository } from "./postgres-outbox-repository"
-import { PostgresUnitOfWork } from "./postgres-unit-of-work"
+import { PostgresAccountRepository } from './postgres-account-repository';
+import { PostgresUserRepository } from './postgres-user-repository';
+import { PostgresWalletRepository } from './postgres-wallet-repository';
+import { PostgresLedgerRepository } from './postgres-ledger-repository';
+import { PostgresRemittanceRepository } from './postgres-remittance-repository';
+import { PostgresKycProfileRepository } from './postgres-kyc-profile-repository';
+import { PostgresIdempotencyRepository } from './postgres-idempotency-repository';
+import { PostgresOutboxRepository } from './postgres-outbox-repository';
+import { PostgresUnitOfWork } from './postgres-unit-of-work';
 
 /**
  * Postgres counterpart to in-memory-registry.ts, imported by every
@@ -28,4 +28,4 @@ export const postgresRegistry = {
   idempotencyRepository: new PostgresIdempotencyRepository(),
   outboxRepository: new PostgresOutboxRepository(),
   unitOfWork: new PostgresUnitOfWork(),
-}
+};

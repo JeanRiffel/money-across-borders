@@ -1,19 +1,19 @@
-import { KycProfile } from "../../../domain/compliance/entities/kyc-profile";
-import { KycProfileRepository } from "../../../domain/compliance/repository/kyc-profile-repository";
-import { KycProfileId } from "../../../domain/compliance/value-objects/kyc-profile-id-value-object";
-import { KycStatus } from "../../../domain/compliance/value-objects/kyc-status-value-object";
-import { AccountId } from "../../../domain/account/value-objects/account-id-value-object";
-import { getExecutor } from "../../config/database/postgresql/pg";
+import { KycProfile } from '../../../domain/compliance/entities/kyc-profile';
+import { KycProfileRepository } from '../../../domain/compliance/repository/kyc-profile-repository';
+import { KycProfileId } from '../../../domain/compliance/value-objects/kyc-profile-id-value-object';
+import { KycStatus } from '../../../domain/compliance/value-objects/kyc-status-value-object';
+import { AccountId } from '../../../domain/account/value-objects/account-id-value-object';
+import { getExecutor } from '../../config/database/postgresql/pg';
 
 type KycProfileRow = {
-  id: string
-  account_id: string
-  status_id: number
-  full_name: string
-  document_id: string
-  verified_at: Date | null
-  created_at: Date
-}
+  id: string;
+  account_id: string;
+  status_id: number;
+  full_name: string;
+  document_id: string;
+  verified_at: Date | null;
+  created_at: Date;
+};
 
 function toKycProfile(row: KycProfileRow): KycProfile {
   return new KycProfile(
@@ -24,11 +24,10 @@ function toKycProfile(row: KycProfileRow): KycProfile {
     row.document_id,
     row.verified_at,
     row.created_at
-  )
+  );
 }
 
 export class PostgresKycProfileRepository implements KycProfileRepository {
-
   // One profile per account (schema's UNIQUE (account_id)) — upsert BY
   // account_id, not by profile id, matching InMemoryKycProfileRepository's
   // findIndex-by-accountId-replace behavior.
@@ -50,7 +49,7 @@ export class PostgresKycProfileRepository implements KycProfileRepository {
         profile.getVerifiedAt(),
         profile.getCreatedAt(),
       ]
-    )
+    );
   }
 
   async findByAccountId(accountId: AccountId): Promise<KycProfile | null> {
@@ -58,7 +57,7 @@ export class PostgresKycProfileRepository implements KycProfileRepository {
       `SELECT id, account_id, status_id, full_name, document_id, verified_at, created_at
        FROM kyc_profiles WHERE account_id = $1`,
       [accountId.getValue()]
-    )
-    return result.rows[0] ? toKycProfile(result.rows[0]) : null
+    );
+    return result.rows[0] ? toKycProfile(result.rows[0]) : null;
   }
 }

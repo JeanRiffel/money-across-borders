@@ -2,11 +2,11 @@ export class UserStatus {
   constructor(private id: number) {}
 
   static active(): UserStatus {
-    return new UserStatus(1)
+    return new UserStatus(1);
   }
 
   static suspended(): UserStatus {
-    return new UserStatus(2)
+    return new UserStatus(2);
   }
 
   getId(): number {
@@ -14,7 +14,7 @@ export class UserStatus {
   }
 
   isActive(): boolean {
-    return this.id === 1
+    return this.id === 1;
   }
 
   toJSON() {

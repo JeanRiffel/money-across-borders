@@ -1,16 +1,15 @@
-import { Router, Request, Response } from 'express'
-import { SendRemittanceController } from '../../controllers/send-remittance.controller'
-import { SearchRemittancesController } from '../../controllers/search-remittances.controller'
-import { authMiddleware } from '../../middlewares/auth.middleware'
-import { TokenVerifier } from 'src/application/shared/authentication/token-authentication'
+import { Router, Request, Response } from 'express';
+import { SendRemittanceController } from '../../controllers/send-remittance.controller';
+import { SearchRemittancesController } from '../../controllers/search-remittances.controller';
+import { authMiddleware } from '../../middlewares/auth.middleware';
+import { TokenVerifier } from 'src/application/shared/authentication/token-authentication';
 
 const remittanceRouter = (
   sendController: SendRemittanceController,
   searchController: SearchRemittancesController,
   tokenVerifier: TokenVerifier
 ): Router => {
-
-  const router = Router()
+  const router = Router();
 
   /**
    * @openapi
@@ -70,14 +69,18 @@ const remittanceRouter = (
    *           application/json:
    *             schema: { $ref: '#/components/schemas/ErrorResponse' }
    */
-  router.post('/remittances', authMiddleware(tokenVerifier), async (req: Request, res: Response) => {
-    try {
-      const result = await sendController.handle(req)
-      res.status(result.statusCode).json(result)
-    } catch (error) {
-      res.status(500).json(error)
+  router.post(
+    '/remittances',
+    authMiddleware(tokenVerifier),
+    async (req: Request, res: Response) => {
+      try {
+        const result = await sendController.handle(req);
+        res.status(result.statusCode).json(result);
+      } catch (error) {
+        res.status(500).json(error);
+      }
     }
-  })
+  );
 
   // Read side (Elasticsearch, eventually consistent) — see
   // search-remittances.controller.ts and CLAUDE.md's EventPublisher note.
@@ -142,14 +145,14 @@ const remittanceRouter = (
    */
   router.get('/remittances', authMiddleware(tokenVerifier), async (req: Request, res: Response) => {
     try {
-      const result = await searchController.handle(req)
-      res.status(result.statusCode).json(result)
+      const result = await searchController.handle(req);
+      res.status(result.statusCode).json(result);
     } catch (error) {
-      res.status(500).json(error)
+      res.status(500).json(error);
     }
-  })
+  });
 
-  return router
-}
+  return router;
+};
 
-export { remittanceRouter }
+export { remittanceRouter };

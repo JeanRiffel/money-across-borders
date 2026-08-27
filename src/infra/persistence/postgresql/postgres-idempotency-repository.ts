@@ -1,12 +1,14 @@
-import { IdempotencyRecord, IdempotencyRepository } from "../../../application/repositories/idempotency-repository";
-import { getExecutor } from "../../config/database/postgresql/pg";
+import {
+  IdempotencyRecord,
+  IdempotencyRepository,
+} from '../../../application/repositories/idempotency-repository';
+import { getExecutor } from '../../config/database/postgresql/pg';
 
 type IdempotencyRow = {
-  response_body: unknown | null
-}
+  response_body: unknown | null;
+};
 
 export class PostgresIdempotencyRepository<O = any> implements IdempotencyRepository<O> {
-
   // Returns the cached response value directly — NOT wrapped in
   // {key, response}/IdempotencyRecord — deliberately matching
   // InMemoryIdempotencyRepository's real, tested contract. IdempotentDecorator
@@ -18,13 +20,13 @@ export class PostgresIdempotencyRepository<O = any> implements IdempotencyReposi
     const result = await getExecutor().query<IdempotencyRow>(
       `SELECT response_body FROM idempotency_records WHERE key = $1`,
       [key]
-    )
+    );
     // response_body is NULL for a row that's been claim()ed but hasn't had
     // save() called yet (still in flight) — treated the same as "no row at
     // all" here; IdempotentDecorator only reaches this after claim() has
     // already told it whether *it* holds the reservation.
-    if (!result.rows[0] || result.rows[0].response_body === null) return null
-    return result.rows[0].response_body as IdempotencyRecord<O>
+    if (!result.rows[0] || result.rows[0].response_body === null) return null;
+    return result.rows[0].response_body as IdempotencyRecord<O>;
   }
 
   // Atomically reserves `key` via the UNIQUE constraint — the real
@@ -34,8 +36,8 @@ export class PostgresIdempotencyRepository<O = any> implements IdempotencyReposi
     const result = await getExecutor().query(
       `INSERT INTO idempotency_records (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
       [key]
-    )
-    return (result.rowCount ?? 0) > 0
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Upserts by key: the row already exists from claim() in the normal path,
@@ -56,7 +58,7 @@ export class PostgresIdempotencyRepository<O = any> implements IdempotencyReposi
         JSON.stringify(record.response ?? null),
         record.status_code ?? null,
       ]
-    )
+    );
   }
 
   // Releases a reservation that never completed (the wrapped use case
@@ -67,6 +69,6 @@ export class PostgresIdempotencyRepository<O = any> implements IdempotencyReposi
     await getExecutor().query(
       `DELETE FROM idempotency_records WHERE key = $1 AND response_body IS NULL`,
       [key]
-    )
+    );
   }
 }

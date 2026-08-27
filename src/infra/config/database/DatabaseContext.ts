@@ -1,18 +1,17 @@
-import { DatabaseStrategy } from "./DatabaseStrategy";
+import { DatabaseStrategy } from './DatabaseStrategy';
 
 export class DatabaseContext {
-  private strategy: DatabaseStrategy
+  private strategy: DatabaseStrategy;
 
-  constructor(strategy: DatabaseStrategy){
+  constructor(strategy: DatabaseStrategy) {
     this.strategy = strategy;
   }
 
-  async connect(){
-    await this.strategy.connect()
+  async connect() {
+    await this.strategy.connect();
   }
 
-  async disconnect(){
-    await this.strategy.disconnect()
+  async disconnect() {
+    await this.strategy.disconnect();
   }
-
 }

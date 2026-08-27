@@ -21,17 +21,18 @@ dotenv.config();
 // amqp://user:pass@localhost:5672 directly in source, ignoring .env
 // entirely (and not even matching .env.example's guest:guest).
 function buildConnectionUrl(): string {
-  const host = process.env.RABBITMQ_HOST || 'localhost'
-  const port = process.env.RABBITMQ_PORT || '5672'
-  const user = process.env.RABBITMQ_USER || 'guest'
-  const password = process.env.RABBITMQ_PASSWORD || 'guest'
-  return `amqp://${user}:${password}@${host}:${port}`
+  const host = process.env.RABBITMQ_HOST || 'localhost';
+  const port = process.env.RABBITMQ_PORT || '5672';
+  const user = process.env.RABBITMQ_USER || 'guest';
+  const password = process.env.RABBITMQ_PASSWORD || 'guest';
+  return `amqp://${user}:${password}@${host}:${port}`;
 }
 
-type RabbitMQConnection = Awaited<ReturnType<typeof amqp.connect>>
-type RabbitMQChannel = Awaited<ReturnType<RabbitMQConnection['createChannel']>>
+type RabbitMQConnection = Awaited<ReturnType<typeof amqp.connect>>;
+type RabbitMQChannel = Awaited<ReturnType<RabbitMQConnection['createChannel']>>;
 
-let connectPromise: Promise<{ connection: RabbitMQConnection; channel: RabbitMQChannel }> | null = null
+let connectPromise: Promise<{ connection: RabbitMQConnection; channel: RabbitMQChannel }> | null =
+  null;
 
 // Memoized/lazy, like connectRedis() — nothing connects at import time
 // anymore. Unlike Redis (fatal at boot, see server.ts), RabbitMQ stays
@@ -44,14 +45,14 @@ let connectPromise: Promise<{ connection: RabbitMQConnection; channel: RabbitMQC
 export const connectRabbitMQ = async () => {
   if (!connectPromise) {
     connectPromise = (async () => {
-      const connection = await amqp.connect(buildConnectionUrl())
-      const channel = await connection.createChannel()
-      logger.info('✅ Connected to RabbitMQ')
-      return { connection, channel }
+      const connection = await amqp.connect(buildConnectionUrl());
+      const channel = await connection.createChannel();
+      logger.info('✅ Connected to RabbitMQ');
+      return { connection, channel };
     })().catch((error) => {
-      connectPromise = null
-      throw error
-    })
+      connectPromise = null;
+      throw error;
+    });
   }
-  return connectPromise
-}
+  return connectPromise;
+};

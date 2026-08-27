@@ -2,11 +2,11 @@ export class WalletStatus {
   constructor(private id: number) {}
 
   static active(): WalletStatus {
-    return new WalletStatus(1)
+    return new WalletStatus(1);
   }
 
   static closed(): WalletStatus {
-    return new WalletStatus(2)
+    return new WalletStatus(2);
   }
 
   getId(): number {

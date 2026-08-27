@@ -1,12 +1,12 @@
-import { InMemoryAccountRepository } from "./in-memory-account-repository"
-import { InMemoryUserRepository } from "./in-memory-user-repository"
-import { InMemoryIdempotencyRepository } from "./in-memory-idempotency-repository"
-import { InMemoryWalletRepository } from "./in-memory-wallet-repository"
-import { InMemoryLedgerRepository } from "./in-memory-ledger-repository"
-import { InMemoryRemittanceRepository } from "./in-memory-remittance-repository"
-import { InMemoryKycProfileRepository } from "./in-memory-kyc-profile-repository"
-import { InMemoryOutboxRepository } from "./in-memory-outbox-repository"
-import { InMemoryUnitOfWork } from "./in-memory-unit-of-work"
+import { InMemoryAccountRepository } from './in-memory-account-repository';
+import { InMemoryUserRepository } from './in-memory-user-repository';
+import { InMemoryIdempotencyRepository } from './in-memory-idempotency-repository';
+import { InMemoryWalletRepository } from './in-memory-wallet-repository';
+import { InMemoryLedgerRepository } from './in-memory-ledger-repository';
+import { InMemoryRemittanceRepository } from './in-memory-remittance-repository';
+import { InMemoryKycProfileRepository } from './in-memory-kyc-profile-repository';
+import { InMemoryOutboxRepository } from './in-memory-outbox-repository';
+import { InMemoryUnitOfWork } from './in-memory-unit-of-work';
 
 /**
  * A single shared instance of every in-memory repository. Historically this
@@ -28,4 +28,4 @@ export const inMemoryRegistry = {
   idempotencyRepository: new InMemoryIdempotencyRepository(),
   outboxRepository: new InMemoryOutboxRepository(),
   unitOfWork: new InMemoryUnitOfWork(),
-}
+};

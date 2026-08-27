@@ -1,11 +1,11 @@
-import { elasticsearchClient } from "../../config/database/elasticsearch/elasticsearch-client"
+import { elasticsearchClient } from '../../config/database/elasticsearch/elasticsearch-client';
 import {
   RemittanceSearchDocument,
   RemittanceSearchIndex,
   RemittanceSearchQuery,
-} from "../../../application/remittance/repositories/remittance-search-index"
+} from '../../../application/remittance/repositories/remittance-search-index';
 
-const INDEX = 'remittances'
+const INDEX = 'remittances';
 
 // Explicit mapping rather than relying on Elasticsearch's dynamic mapping:
 // dynamic mapping would infer senderAccountId/recipientAccountId/status as
@@ -17,8 +17,8 @@ const INDEX = 'remittances'
 // just without a formal migration runner — there's exactly one index, so a
 // lazy "create if missing" call is enough for this showcase.
 async function ensureIndexExists(): Promise<void> {
-  const exists = await elasticsearchClient.indices.exists({ index: INDEX })
-  if (exists) return
+  const exists = await elasticsearchClient.indices.exists({ index: INDEX });
+  if (exists) return;
 
   await elasticsearchClient.indices.create({
     index: INDEX,
@@ -37,13 +37,12 @@ async function ensureIndexExists(): Promise<void> {
         createdAt: { type: 'date' },
       },
     },
-  })
+  });
 }
 
 export class ElasticsearchRemittanceSearchIndex implements RemittanceSearchIndex {
-
   async index(document: RemittanceSearchDocument): Promise<void> {
-    await ensureIndexExists()
+    await ensureIndexExists();
     // Indexed by remittanceId so a redelivered/duplicate Kafka message
     // (at-least-once delivery) overwrites the same document instead of
     // creating a duplicate — indexing is naturally idempotent this way,
@@ -52,13 +51,13 @@ export class ElasticsearchRemittanceSearchIndex implements RemittanceSearchIndex
       index: INDEX,
       id: document.remittanceId,
       document,
-    })
+    });
   }
 
   async search(query: RemittanceSearchQuery): Promise<RemittanceSearchDocument[]> {
-    await ensureIndexExists()
+    await ensureIndexExists();
 
-    const filters: object[] = []
+    const filters: object[] = [];
 
     // Matches either side of the transfer — "remittances involving this
     // account" (see RemittanceSearchQuery's comment).
@@ -70,10 +69,10 @@ export class ElasticsearchRemittanceSearchIndex implements RemittanceSearchIndex
         ],
         minimum_should_match: 1,
       },
-    })
+    });
 
     if (query.status) {
-      filters.push({ term: { status: query.status } })
+      filters.push({ term: { status: query.status } });
     }
 
     if (query.from || query.to) {
@@ -84,7 +83,7 @@ export class ElasticsearchRemittanceSearchIndex implements RemittanceSearchIndex
             ...(query.to ? { lte: query.to } : {}),
           },
         },
-      })
+      });
     }
 
     const result = await elasticsearchClient.search<RemittanceSearchDocument>({
@@ -92,11 +91,10 @@ export class ElasticsearchRemittanceSearchIndex implements RemittanceSearchIndex
       query: { bool: { filter: filters } },
       sort: [{ createdAt: { order: 'desc' } }],
       size: query.limit ?? 20,
-    })
+    });
 
     return result.hits.hits
       .map((hit) => hit._source)
-      .filter((source): source is RemittanceSearchDocument => source !== undefined)
+      .filter((source): source is RemittanceSearchDocument => source !== undefined);
   }
-
 }

@@ -4,5 +4,5 @@
 // stay dependent on an abstraction, not on Postgres specifically; the
 // in-memory implementation is a no-op passthrough for tests.
 export interface UnitOfWork {
-  runInTransaction<T>(work: () => Promise<T>): Promise<T>
+  runInTransaction<T>(work: () => Promise<T>): Promise<T>;
 }

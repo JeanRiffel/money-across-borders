@@ -1,8 +1,7 @@
-import { consumeMessages } from "../config/message-broker/rabbitmq-consumer";
+import { consumeMessages } from '../config/message-broker/rabbitmq-consumer';
 
 export const consumeTransaction = async () => {
-    await consumeMessages('transaction')
+  await consumeMessages('transaction');
 };
 
-
-consumeTransaction()
+consumeTransaction();

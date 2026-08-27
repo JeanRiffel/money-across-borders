@@ -3,29 +3,30 @@
 // idempotent (CREATE TABLE IF NOT EXISTS, ON CONFLICT DO NOTHING), so this
 // is safe to re-run against an already-migrated database — run it once
 // before `npm run dev`/`npm start` against a fresh one (see CLAUDE.md).
-import fs from "node:fs"
-import path from "node:path"
-import { pool } from "../../../config/database/postgresql/pg"
-import { logger } from "../../../observability/logger"
+import fs from 'node:fs';
+import path from 'node:path';
+import { pool } from '../../../config/database/postgresql/pg';
+import { logger } from '../../../observability/logger';
 
-const MIGRATIONS_DIR = __dirname
+const MIGRATIONS_DIR = __dirname;
 
 async function run(): Promise<void> {
-  const files = fs.readdirSync(MIGRATIONS_DIR)
-    .filter(file => file.endsWith(".sql"))
-    .sort()
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
 
   for (const file of files) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8")
-    logger.info(`Applying ${file}...`)
-    await pool.query(sql)
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+    logger.info(`Applying ${file}...`);
+    await pool.query(sql);
   }
 
-  logger.info(`✓ Applied ${files.length} migration(s)`)
-  await pool.end()
+  logger.info(`✓ Applied ${files.length} migration(s)`);
+  await pool.end();
 }
 
 run().catch((error) => {
-  logger.error({ error }, "✗ Migration failed")
-  process.exit(1)
-})
+  logger.error({ error }, '✗ Migration failed');
+  process.exit(1);
+});

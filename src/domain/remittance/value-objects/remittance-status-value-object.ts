@@ -2,19 +2,19 @@ export class RemittanceStatus {
   constructor(private id: number) {}
 
   static completed(): RemittanceStatus {
-    return new RemittanceStatus(1)
+    return new RemittanceStatus(1);
   }
 
   static rejectedCompliance(): RemittanceStatus {
-    return new RemittanceStatus(2)
+    return new RemittanceStatus(2);
   }
 
   static rejectedInsufficientFunds(): RemittanceStatus {
-    return new RemittanceStatus(3)
+    return new RemittanceStatus(3);
   }
 
   static failed(): RemittanceStatus {
-    return new RemittanceStatus(4)
+    return new RemittanceStatus(4);
   }
 
   getId(): number {

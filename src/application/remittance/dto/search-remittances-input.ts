@@ -12,11 +12,11 @@ export class SearchRemittancesInput {
   ) {}
 
   static from(raw: {
-    accountId: string
-    status?: string
-    from?: string
-    to?: string
-    limit?: string | number
+    accountId: string;
+    status?: string;
+    from?: string;
+    to?: string;
+    limit?: string | number;
   }): SearchRemittancesInput {
     return new SearchRemittancesInput(
       raw.accountId,
@@ -24,6 +24,6 @@ export class SearchRemittancesInput {
       raw.from,
       raw.to,
       raw.limit !== undefined ? Number(raw.limit) : undefined
-    )
+    );
   }
 }

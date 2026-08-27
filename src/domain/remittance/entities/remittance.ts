@@ -1,8 +1,8 @@
-import { AccountId } from '../../account/value-objects/account-id-value-object'
-import { WalletId } from '../../wallet/value-objects/wallet-id-value-object'
-import { Money } from '../../shared/value-objects/money-value-object'
-import { RemittanceId } from '../value-objects/remittance-id-value-object'
-import { RemittanceStatus } from '../value-objects/remittance-status-value-object'
+import { AccountId } from '../../account/value-objects/account-id-value-object';
+import { WalletId } from '../../wallet/value-objects/wallet-id-value-object';
+import { Money } from '../../shared/value-objects/money-value-object';
+import { RemittanceId } from '../value-objects/remittance-id-value-object';
+import { RemittanceStatus } from '../value-objects/remittance-status-value-object';
 
 /**
  * Remittance is the business-facing record of one cross-border transfer.
@@ -11,7 +11,6 @@ import { RemittanceStatus } from '../value-objects/remittance-status-value-objec
  * transactionId (see LedgerService).
  */
 export class Remittance {
-
   constructor(
     private readonly id: RemittanceId,
     private readonly senderAccountId: AccountId,
@@ -27,54 +26,53 @@ export class Remittance {
   ) {}
 
   getId(): RemittanceId {
-    return this.id
+    return this.id;
   }
 
   getSenderAccountId(): AccountId {
-    return this.senderAccountId
+    return this.senderAccountId;
   }
 
   getRecipientAccountId(): AccountId {
-    return this.recipientAccountId
+    return this.recipientAccountId;
   }
 
   getSourceWalletId(): WalletId {
-    return this.sourceWalletId
+    return this.sourceWalletId;
   }
 
   getDestinationWalletId(): WalletId {
-    return this.destinationWalletId
+    return this.destinationWalletId;
   }
 
   getSourceAmount(): Money {
-    return this.sourceAmount
+    return this.sourceAmount;
   }
 
   getFee(): Money {
-    return this.fee
+    return this.fee;
   }
 
   getConvertedAmount(): Money {
-    return this.convertedAmount
+    return this.convertedAmount;
   }
 
   getExchangeRate(): number {
-    return this.exchangeRate
+    return this.exchangeRate;
   }
 
   getStatus(): RemittanceStatus {
-    return this.status
+    return this.status;
   }
 
   getCreatedAt(): Date {
-    return this.createdAt
+    return this.createdAt;
   }
 
   // The remittance id doubles as the grouping id for its ledger legs, so the
   // business record and its accounting substrate are always linkable by the
   // same identifier.
   getTransactionId(): string {
-    return this.id.getValue()
+    return this.id.getValue();
   }
-
 }

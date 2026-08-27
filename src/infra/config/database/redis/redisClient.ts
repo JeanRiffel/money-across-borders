@@ -1,6 +1,6 @@
-import { createClient } from "redis";
-import dotenv from "dotenv";
-import { logger } from "../../../observability/logger";
+import { createClient } from 'redis';
+import dotenv from 'dotenv';
+import { logger } from '../../../observability/logger';
 
 // Self-contained on purpose, matching pg.ts's exact rationale: process.env
 // is read eagerly below (host/port/password are module-level consts), so
@@ -20,8 +20,8 @@ dotenv.config();
 // single REDIS_URL instead, which this project's .env never defined, so it
 // silently fell back to node-redis's own redis://localhost:6379 default and
 // ignored REDIS_HOST/REDIS_PORT/REDIS_PASSWORD entirely.
-const host = process.env.REDIS_HOST || "localhost";
-const port = process.env.REDIS_PORT || "6379";
+const host = process.env.REDIS_HOST || 'localhost';
+const port = process.env.REDIS_PORT || '6379';
 const password = process.env.REDIS_PASSWORD;
 
 const redisClient = createClient({
@@ -32,7 +32,7 @@ const redisClient = createClient({
   ...(password ? { password } : {}),
 });
 
-redisClient.on("error", (err) => logger.error({ err }, "Redis Client Error"));
+redisClient.on('error', (err) => logger.error({ err }, 'Redis Client Error'));
 
 let connectPromise: Promise<typeof redisClient> | null = null;
 
@@ -46,7 +46,7 @@ let connectPromise: Promise<typeof redisClient> | null = null;
 export async function connectRedis(): Promise<typeof redisClient> {
   if (!connectPromise) {
     connectPromise = redisClient.connect().then(() => {
-      logger.info("✅ Connected to Redis");
+      logger.info('✅ Connected to Redis');
       return redisClient;
     });
   }

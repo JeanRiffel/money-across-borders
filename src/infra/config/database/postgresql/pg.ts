@@ -1,6 +1,6 @@
-import { Pool, PoolClient } from "pg";
-import { AsyncLocalStorage } from "node:async_hooks";
-import dotenv from "dotenv";
+import { Pool, PoolClient } from 'pg';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import dotenv from 'dotenv';
 
 // Self-contained on purpose: `pool` is constructed eagerly below, at import
 // time, so POSTGRES_* must already be in process.env by then regardless of
@@ -14,7 +14,7 @@ export const pool = new Pool({
   host: process.env.POSTGRES_HOST,
   database: process.env.POSTGRES_DATABASE,
   password: process.env.POSTGRES_PASSWORD,
-  port: Number(process.env.POSTGRES_PORT)
+  port: Number(process.env.POSTGRES_PORT),
 });
 
 // Ambient home for "the PoolClient of the transaction currently in flight",

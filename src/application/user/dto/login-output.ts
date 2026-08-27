@@ -1,12 +1,12 @@
-import { User } from "../../../domain/user/entities/user"
-import { Account } from "../../../domain/account/entities/account"
+import { User } from '../../../domain/user/entities/user';
+import { Account } from '../../../domain/account/entities/account';
 
 export class LoginOutput {
   constructor(
     public readonly token: string,
     public readonly userId: string,
     public readonly accountId: string,
-    public readonly email: string,
+    public readonly email: string
   ) {}
 
   static from(token: string, user: User, account: Account): LoginOutput {
@@ -14,7 +14,7 @@ export class LoginOutput {
       token,
       user.getId().getValue(),
       account.getId().getValue(),
-      user.getEmail(),
-    )
+      user.getEmail()
+    );
   }
 }

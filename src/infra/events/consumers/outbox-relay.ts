@@ -1,11 +1,11 @@
-import { postgresRegistry } from "../../persistence/postgresql/postgres-registry"
-import { connectRabbitMQ } from "../../config/message-broker/rabbitmq-connection"
-import { logger } from "../../observability/logger"
+import { postgresRegistry } from '../../persistence/postgresql/postgres-registry';
+import { connectRabbitMQ } from '../../config/message-broker/rabbitmq-connection';
+import { logger } from '../../observability/logger';
 
-const POLL_INTERVAL_MS = Number(process.env.OUTBOX_RELAY_INTERVAL_MS) || 5000
-const BATCH_SIZE = 50
+const POLL_INTERVAL_MS = Number(process.env.OUTBOX_RELAY_INTERVAL_MS) || 5000;
+const BATCH_SIZE = 50;
 
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Runs as its own long-running process (see the worker:outbox-relay npm
 // script), same shape as account-created-consumer.ts /
@@ -26,10 +26,10 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 // today — a fixed poll interval is enough to eventually drain a queue built
 // up during a RabbitMQ outage once it's reachable again.
 async function relayOnce(): Promise<void> {
-  const events = await postgresRegistry.outboxRepository.findUnpublished(BATCH_SIZE)
-  if (events.length === 0) return
+  const events = await postgresRegistry.outboxRepository.findUnpublished(BATCH_SIZE);
+  if (events.length === 0) return;
 
-  const { channel } = await connectRabbitMQ()
+  const { channel } = await connectRabbitMQ();
 
   for (const event of events) {
     try {
@@ -37,40 +37,46 @@ async function relayOnce(): Promise<void> {
       // doubles as the queue name, durable queue + persistent message so a
       // queued event survives a broker restart before a consumer picks it
       // up.
-      await channel.assertQueue(event.topic, { durable: true })
+      await channel.assertQueue(event.topic, { durable: true });
       channel.sendToQueue(event.topic, Buffer.from(JSON.stringify(event.payload)), {
         persistent: true,
         contentType: 'application/json',
-      })
-      await postgresRegistry.outboxRepository.markPublished(event.id)
-      logger.info({ id: event.id, topic: event.topic }, `Relayed outbox event ${event.id} (${event.topic})`)
+      });
+      await postgresRegistry.outboxRepository.markPublished(event.id);
+      logger.info(
+        { id: event.id, topic: event.topic },
+        `Relayed outbox event ${event.id} (${event.topic})`
+      );
     } catch (error) {
-      logger.warn({ error, id: event.id, topic: event.topic }, 'Failed to relay outbox event, will retry next poll')
+      logger.warn(
+        { error, id: event.id, topic: event.topic },
+        'Failed to relay outbox event, will retry next poll'
+      );
     }
   }
 }
 
 export const runOutboxRelay = async (): Promise<void> => {
-  logger.info(`Outbox relay polling every ${POLL_INTERVAL_MS}ms...`)
+  logger.info(`Outbox relay polling every ${POLL_INTERVAL_MS}ms...`);
 
   for (;;) {
     try {
-      await relayOnce()
+      await relayOnce();
     } catch (error) {
       // Covers findUnpublished()/connectRabbitMQ() itself failing (e.g.
       // Postgres or RabbitMQ unreachable) — logged and retried next tick,
       // same posture as a per-event failure inside relayOnce().
-      logger.error({ error }, 'Outbox relay tick failed')
+      logger.error({ error }, 'Outbox relay tick failed');
     }
-    await sleep(POLL_INTERVAL_MS)
+    await sleep(POLL_INTERVAL_MS);
   }
-}
+};
 
 // Guarded like the other consumers/server.ts's startServer(): only runs
 // when this file is the actual entrypoint.
 if (require.main === module) {
   runOutboxRelay().catch((error) => {
-    logger.error({ error }, 'Failed to start outbox relay')
-    process.exit(1)
-  })
+    logger.error({ error }, 'Failed to start outbox relay');
+    process.exit(1);
+  });
 }

@@ -1,13 +1,13 @@
-import { AccountId } from "../value-objects/account-id-value-object"
-import { AccountStatus } from "../value-objects/account-status-value-object"
-import { UserId } from "../../user/value-objects/user-id-value-object"
+import { AccountId } from '../value-objects/account-id-value-object';
+import { AccountStatus } from '../value-objects/account-status-value-object';
+import { UserId } from '../../user/value-objects/user-id-value-object';
 
 export type AccountJSON = {
-  id: AccountId,
-  userId: UserId | null,
-  status: AccountStatus,
-  createdAt: Date,
-}
+  id: AccountId;
+  userId: UserId | null;
+  status: AccountStatus;
+  createdAt: Date;
+};
 
 /**
  * Account is the financial/ledger relationship — the thing Wallet,
@@ -18,28 +18,26 @@ export type AccountJSON = {
  * domain/wallet/treasury-account.ts) is an Account with no User at all.
  */
 export class Account {
-
   constructor(
     private readonly id: AccountId,
     private readonly userId: UserId | null,
     private readonly status: AccountStatus,
-    private readonly createdAt: Date,
-  ){}
+    private readonly createdAt: Date
+  ) {}
 
   getId(): AccountId {
-    return this.id
+    return this.id;
   }
 
   getUserId(): UserId | null {
-    return this.userId
+    return this.userId;
   }
 
   getStatus(): AccountStatus {
-    return this.status
+    return this.status;
   }
 
   getCreatedAt(): Date {
-    return this.createdAt
+    return this.createdAt;
   }
-
 }

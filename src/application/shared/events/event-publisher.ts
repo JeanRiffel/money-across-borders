@@ -12,5 +12,5 @@
 // acceptable (see SendRemittanceUseCase). An implementation should catch
 // and log its own failures instead of propagating them.
 export interface EventPublisher {
-  publish(topic: string, payload: Record<string, unknown>): Promise<void>
+  publish(topic: string, payload: Record<string, unknown>): Promise<void>;
 }

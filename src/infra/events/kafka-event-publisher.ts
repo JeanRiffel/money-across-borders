@@ -1,6 +1,6 @@
-import { EventPublisher } from "../../application/shared/events/event-publisher"
-import { getKafkaProducer } from "../config/message-broker/kafka-connection"
-import { logger } from "../observability/logger"
+import { EventPublisher } from '../../application/shared/events/event-publisher';
+import { getKafkaProducer } from '../config/message-broker/kafka-connection';
+import { logger } from '../observability/logger';
 
 // Kafka counterpart to RabbitMQEventPublisher — same EventPublisher port,
 // different broker underneath, chosen per event by whichever factory wires
@@ -11,7 +11,6 @@ import { logger } from "../observability/logger"
 // item the way account.created is. See CLAUDE.md's EventPublisher note for
 // the full RabbitMQ-vs-Kafka reasoning.
 export class KafkaEventPublisher implements EventPublisher {
-
   // Never throws (same contract as RabbitMQEventPublisher): a failed
   // connect/send is caught and logged here, not surfaced to the caller —
   // losing an occasional remittance.completed event means that remittance
@@ -19,14 +18,13 @@ export class KafkaEventPublisher implements EventPublisher {
   // remittance itself fails.
   async publish(topic: string, payload: Record<string, unknown>): Promise<void> {
     try {
-      const producer = await getKafkaProducer()
+      const producer = await getKafkaProducer();
       await producer.send({
         topic,
         messages: [{ value: JSON.stringify(payload) }],
-      })
+      });
     } catch (error) {
-      logger.warn({ error, topic }, 'Failed to publish event to Kafka')
+      logger.warn({ error, topic }, 'Failed to publish event to Kafka');
     }
   }
-
 }

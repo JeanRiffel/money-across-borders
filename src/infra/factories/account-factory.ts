@@ -1,10 +1,10 @@
-import { buildAccountModule } from "src/main/account/account-module";
-import { UseCase } from "src/application/shared/idempotency/common-use-case.";
-import { CreateAccountInput } from "src/application/account/dto/create-account-input";
-import { CreateAccountOutput } from "src/application/account/dto/create-account-output";
-import { BcryptPasswordHasher } from "../security/bycrypt-password-hasher";
-import { postgresRegistry } from "../persistence/postgresql/postgres-registry";
-import { redisRegistry } from "../persistence/redis/redis-registry";
+import { buildAccountModule } from 'src/main/account/account-module';
+import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
+import { CreateAccountInput } from 'src/application/account/dto/create-account-input';
+import { CreateAccountOutput } from 'src/application/account/dto/create-account-output';
+import { BcryptPasswordHasher } from '../security/bycrypt-password-hasher';
+import { postgresRegistry } from '../persistence/postgresql/postgres-registry';
+import { redisRegistry } from '../persistence/redis/redis-registry';
 
 export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccountOutput> {
   const dependencies = {
@@ -28,8 +28,8 @@ export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccoun
     // CreateAccountUseCase for why. worker:outbox-relay
     // (src/infra/events/consumers/outbox-relay.ts) is the process that
     // actually delivers these to RabbitMQ.
-    outboxRepository: postgresRegistry.outboxRepository
-  }
+    outboxRepository: postgresRegistry.outboxRepository,
+  };
 
-  return buildAccountModule(dependencies)
+  return buildAccountModule(dependencies);
 }

@@ -1,4 +1,4 @@
-import { KycDossierAttachment } from "../repositories/kyc-dossier-repository"
+import { KycDossierAttachment } from '../repositories/kyc-dossier-repository';
 
 export class SubmitKycInput {
   constructor(
@@ -11,12 +11,12 @@ export class SubmitKycInput {
   ) {}
 
   static from(raw: {
-    accountId: string
-    fullName: string
-    documentId: string
-    documentType?: string
-    attachments?: KycDossierAttachment[]
-    notes?: string
+    accountId: string;
+    fullName: string;
+    documentId: string;
+    documentType?: string;
+    attachments?: KycDossierAttachment[];
+    notes?: string;
   }): SubmitKycInput {
     return new SubmitKycInput(
       raw.accountId,
@@ -25,6 +25,6 @@ export class SubmitKycInput {
       raw.documentType,
       raw.attachments,
       raw.notes
-    )
+    );
   }
 }

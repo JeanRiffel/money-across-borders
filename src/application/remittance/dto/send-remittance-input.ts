@@ -4,7 +4,7 @@ export class SendRemittanceInput {
     public readonly recipientAccountId: string,
     public readonly sourceCurrency: string,
     public readonly destinationCurrency: string,
-    public readonly amountMinorUnits: number,
+    public readonly amountMinorUnits: number
   ) {}
 
   static from(raw: any): SendRemittanceInput {
@@ -13,7 +13,7 @@ export class SendRemittanceInput {
       raw.recipientAccountId,
       raw.sourceCurrency,
       raw.destinationCurrency,
-      raw.amountMinorUnits,
-    )
+      raw.amountMinorUnits
+    );
   }
 }

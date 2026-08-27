@@ -1,7 +1,7 @@
-import { WalletId } from '../../wallet/value-objects/wallet-id-value-object'
-import { Money } from '../../shared/value-objects/money-value-object'
-import { LedgerEntryId } from '../value-objects/ledger-entry-id-value-object'
-import { EntryDirection } from '../value-objects/entry-direction-value-object'
+import { WalletId } from '../../wallet/value-objects/wallet-id-value-object';
+import { Money } from '../../shared/value-objects/money-value-object';
+import { LedgerEntryId } from '../value-objects/ledger-entry-id-value-object';
+import { EntryDirection } from '../value-objects/entry-direction-value-object';
 
 /**
  * A LedgerEntry is one immutable leg of a double-entry posting. Entries are
@@ -10,7 +10,6 @@ import { EntryDirection } from '../value-objects/entry-direction-value-object'
  * together as one atomic, balanced unit (see LedgerService).
  */
 export class LedgerEntry {
-
   constructor(
     private readonly id: LedgerEntryId,
     private readonly walletId: WalletId,
@@ -22,31 +21,30 @@ export class LedgerEntry {
   ) {}
 
   getId(): LedgerEntryId {
-    return this.id
+    return this.id;
   }
 
   getWalletId(): WalletId {
-    return this.walletId
+    return this.walletId;
   }
 
   getDirection(): EntryDirection {
-    return this.direction
+    return this.direction;
   }
 
   getMoney(): Money {
-    return this.money
+    return this.money;
   }
 
   getTransactionId(): string {
-    return this.transactionId
+    return this.transactionId;
   }
 
   getDescription(): string {
-    return this.description
+    return this.description;
   }
 
   getCreatedAt(): Date {
-    return this.createdAt
+    return this.createdAt;
   }
-
 }

@@ -4,21 +4,19 @@ import { connectRabbitMQ } from './rabbitmq-connection';
 import { logger } from '../../observability/logger';
 
 export const consumeMessages = async (queue: string) => {
-    const { channel } = await connectRabbitMQ();
-    await channel.assertQueue(queue, { durable: true });
+  const { channel } = await connectRabbitMQ();
+  await channel.assertQueue(queue, { durable: true });
 
-    logger.info(`Waiting for messages in ${queue}...`);
+  logger.info(`Waiting for messages in ${queue}...`);
 
-    channel.consume(queue, async (message) => {
-      if (!message) return 
+  channel.consume(queue, async (message) => {
+    if (!message) return;
 
-      const transactionInput = JSON.parse(message.content.toString())      
-      const transaction = ProductFactory.create(transactionInput)
-      
-      await new PGTransactionRepostory().save(transaction)
+    const transactionInput = JSON.parse(message.content.toString());
+    const transaction = ProductFactory.create(transactionInput);
 
-      channel.ack(message);
-    });
+    await new PGTransactionRepostory().save(transaction);
+
+    channel.ack(message);
+  });
 };
-
-

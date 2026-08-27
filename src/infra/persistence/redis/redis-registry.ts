@@ -1,5 +1,5 @@
-import { redisClient } from "../../config/database/redis/redisClient"
-import { RedisIdempotencyRepository } from "./redis-idempotency-repository"
+import { redisClient } from '../../config/database/redis/redisClient';
+import { RedisIdempotencyRepository } from './redis-idempotency-repository';
 
 // Redis counterpart to postgres-registry.ts, imported by the factories that
 // now use Redis for idempotency. Wraps the shared redisClient — the same
@@ -11,4 +11,4 @@ import { RedisIdempotencyRepository } from "./redis-idempotency-repository"
 // reachability check.
 export const redisRegistry = {
   idempotencyRepository: new RedisIdempotencyRepository(redisClient),
-}
+};

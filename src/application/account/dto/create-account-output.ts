@@ -1,5 +1,5 @@
-import { Account } from "../../../domain/account/entities/account";
-import { User } from "../../../domain/user/entities/user";
+import { Account } from '../../../domain/account/entities/account';
+import { User } from '../../../domain/user/entities/user';
 
 export class CreateAccountOutput {
   constructor(
@@ -9,7 +9,6 @@ export class CreateAccountOutput {
     public readonly createdAt: string
   ) {}
 
-
   // Takes both aggregates the use case provisions: email lives on User now,
   // everything else comes from the Account it opened for that User.
   static from(account: Account, user: User): CreateAccountOutput {
@@ -18,6 +17,6 @@ export class CreateAccountOutput {
       user.getEmail(),
       account.getStatus().getDescription(),
       account.getCreatedAt().toISOString()
-    )
+    );
   }
 }

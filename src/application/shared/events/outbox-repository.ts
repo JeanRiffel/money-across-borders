@@ -10,14 +10,14 @@
 // thing that calls findUnpublished()/markPublished() — see
 // src/infra/events/consumers/outbox-relay.ts.
 export interface OutboxEventRecord {
-  id: string
-  topic: string
-  payload: Record<string, unknown>
-  createdAt: Date
+  id: string;
+  topic: string;
+  payload: Record<string, unknown>;
+  createdAt: Date;
 }
 
 export interface OutboxRepository {
-  add(topic: string, payload: Record<string, unknown>): Promise<void>
-  findUnpublished(limit: number): Promise<OutboxEventRecord[]>
-  markPublished(id: string): Promise<void>
+  add(topic: string, payload: Record<string, unknown>): Promise<void>;
+  findUnpublished(limit: number): Promise<OutboxEventRecord[]>;
+  markPublished(id: string): Promise<void>;
 }

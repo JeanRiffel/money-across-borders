@@ -1,4 +1,4 @@
-import { EventPublisher } from "../../application/shared/events/event-publisher"
+import { EventPublisher } from '../../application/shared/events/event-publisher';
 
 // Mirrors the rest of the codebase's InMemory* fakes (InMemoryAccountRepository,
 // InMemoryComplianceChecker, ...): records what was published instead of
@@ -9,13 +9,13 @@ import { EventPublisher } from "../../application/shared/events/event-publisher"
 // at all: publishing into an array that's simply never inspected is a safe,
 // genuinely no-op default, not just a stand-in.
 export class InMemoryEventPublisher implements EventPublisher {
-  private published: Array<{ topic: string; payload: Record<string, unknown> }> = []
+  private published: Array<{ topic: string; payload: Record<string, unknown> }> = [];
 
   async publish(topic: string, payload: Record<string, unknown>): Promise<void> {
-    this.published.push({ topic, payload })
+    this.published.push({ topic, payload });
   }
 
   getPublishedEvents(): ReadonlyArray<{ topic: string; payload: Record<string, unknown> }> {
-    return this.published
+    return this.published;
   }
 }

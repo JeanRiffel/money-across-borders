@@ -1,5 +1,5 @@
-import { UserId } from "../value-objects/user-id-value-object"
-import { UserStatus } from "../value-objects/user-status-value-object"
+import { UserId } from '../value-objects/user-id-value-object';
+import { UserStatus } from '../value-objects/user-status-value-object';
 
 /**
  * User is the identity/authentication aggregate: who can sign in and with
@@ -11,7 +11,6 @@ import { UserStatus } from "../value-objects/user-status-value-object"
  * all, which is exactly why this couldn't live as fields on Account.
  */
 export class User {
-
   constructor(
     private readonly id: UserId,
     private readonly email: string,
@@ -21,23 +20,22 @@ export class User {
   ) {}
 
   getId(): UserId {
-    return this.id
+    return this.id;
   }
 
   getEmail(): string {
-    return this.email
+    return this.email;
   }
 
   getPasswordHash(): string {
-    return this.passwordHash
+    return this.passwordHash;
   }
 
   getStatus(): UserStatus {
-    return this.status
+    return this.status;
   }
 
   getCreatedAt(): Date {
-    return this.createdAt
+    return this.createdAt;
   }
-
 }

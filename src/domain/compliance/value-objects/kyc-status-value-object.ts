@@ -2,15 +2,15 @@ export class KycStatus {
   constructor(private id: number) {}
 
   static pending(): KycStatus {
-    return new KycStatus(1)
+    return new KycStatus(1);
   }
 
   static verified(): KycStatus {
-    return new KycStatus(2)
+    return new KycStatus(2);
   }
 
   static rejected(): KycStatus {
-    return new KycStatus(3)
+    return new KycStatus(3);
   }
 
   getId(): number {
@@ -18,7 +18,7 @@ export class KycStatus {
   }
 
   isVerified(): boolean {
-    return this.id === 2
+    return this.id === 2;
   }
 
   toJSON() {

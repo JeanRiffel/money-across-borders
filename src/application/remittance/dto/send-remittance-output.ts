@@ -1,4 +1,4 @@
-import { Remittance } from '../../../domain/remittance/entities/remittance'
+import { Remittance } from '../../../domain/remittance/entities/remittance';
 
 export class SendRemittanceOutput {
   constructor(
@@ -24,6 +24,6 @@ export class SendRemittanceOutput {
       remittance.getConvertedAmount().getAmountMinorUnits(),
       remittance.getExchangeRate(),
       remittance.getCreatedAt().toISOString()
-    )
+    );
   }
 }

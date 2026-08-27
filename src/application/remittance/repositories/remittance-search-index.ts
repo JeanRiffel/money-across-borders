@@ -12,30 +12,30 @@
 // asking for), whereas index() failing is the concern of whatever calls it
 // (the consumer worker), not of this interface's contract.
 export type RemittanceSearchDocument = {
-  remittanceId: string
-  senderAccountId: string
-  recipientAccountId: string
-  status: string
-  sourceCurrency: string
-  sourceAmountMinorUnits: number
-  feeMinorUnits: number
-  destinationCurrency: string
-  convertedAmountMinorUnits: number
-  exchangeRate: number
-  createdAt: string
-}
+  remittanceId: string;
+  senderAccountId: string;
+  recipientAccountId: string;
+  status: string;
+  sourceCurrency: string;
+  sourceAmountMinorUnits: number;
+  feeMinorUnits: number;
+  destinationCurrency: string;
+  convertedAmountMinorUnits: number;
+  exchangeRate: number;
+  createdAt: string;
+};
 
 export type RemittanceSearchQuery = {
   // Matches either sender or recipient — "remittances involving this
   // account", not "remittances sent by this account".
-  accountId?: string
-  status?: string
-  from?: string
-  to?: string
-  limit?: number
-}
+  accountId?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+};
 
 export interface RemittanceSearchIndex {
-  index(document: RemittanceSearchDocument): Promise<void>
-  search(query: RemittanceSearchQuery): Promise<RemittanceSearchDocument[]>
+  index(document: RemittanceSearchDocument): Promise<void>;
+  search(query: RemittanceSearchQuery): Promise<RemittanceSearchDocument[]>;
 }

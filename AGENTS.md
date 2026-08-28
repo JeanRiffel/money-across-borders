@@ -47,6 +47,12 @@ Postgres. Beyond Postgres/Redis, four more pieces of infra (RabbitMQ, Kafka, Ela
 to specific, narrow jobs, all non-fatal at boot — see [docs/infrastructure.md](docs/infrastructure.md) for
 exactly what each one backs.
 
+`npm run seed` (`src/infra/seed/`) generates a deterministic, financially-coherent dataset (customers,
+wallets, ledger-backed balances, remittances in every status the schema supports) directly against Postgres
+for functional/concurrency/load testing — see [docs/seed.md](docs/seed.md) for usage, distributions, and
+its documented deviations from the live HTTP flow (e.g. it can seed KYC/remittance statuses the real use
+cases never persist today).
+
 ## Commands
 
 There is no `node_modules` installed in this environment — run `bun install` or `npm install` first.
@@ -60,6 +66,9 @@ npm run test:watch
 npm run test:coverage
 
 npm run test:integration  # Cucumber, needs a reachable, migrated Postgres
+
+npm run seed -- --customers 100 --seed 42   # deterministic financial fixture data — see docs/seed.md
+npm run test:seed          # seed's own integration suite, needs a reachable, migrated Postgres
 
 npm run lint             # eslint src --ext .ts
 npm run lint:fix

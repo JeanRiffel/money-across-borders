@@ -67,6 +67,7 @@
     "test:coverage": "jest --coverage",
     "test:integration": "cucumber-js",
     "test:seed": "jest --config jest.seed.config.ts",
+    "test:concurrency": "jest --config jest.concurrency.config.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",

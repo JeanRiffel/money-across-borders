@@ -66,6 +66,7 @@ npm run test:watch
 npm run test:coverage
 
 npm run test:integration  # Cucumber, needs a reachable, migrated Postgres
+npm run test:concurrency  # Postgres concurrency lab (locking/isolation/idempotency), needs the same
 
 npm run seed -- --customers 100 --seed 42   # deterministic financial fixture data — see docs/seed.md
 npm run test:seed          # seed's own integration suite, needs a reachable, migrated Postgres
@@ -94,7 +95,10 @@ A single test file: `npm test -- __tests__/domain/entities/account.test.ts`.
 
 `npm test` needs no external services — it never touches Postgres, Redis, RabbitMQ, Kafka, Elasticsearch, or
 Mongo. Everything else (running the server, the workers, `docker compose`, required `.env` vars, and known
-`dotenv`/env-var quirks) is covered in [docs/infrastructure.md](docs/infrastructure.md).
+`dotenv`/env-var quirks) is covered in [docs/infrastructure.md](docs/infrastructure.md). Postgres locking/
+isolation-level/idempotency mechanics specifically (raw SQL against real `wallets`/`idempotency_records`
+rows, kept out of the production write path) are covered in
+[docs/concurrency-lab.md](docs/concurrency-lab.md).
 
 **CI and local hooks**: a GitHub Actions workflow (`.github/workflows/ci.yml`) runs `lint`, `format:check`,
 and `test` on every push and pull request targeting `main`; it is not currently a required status check, so

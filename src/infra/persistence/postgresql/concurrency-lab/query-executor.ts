@@ -1,4 +1,4 @@
-import { QueryResult, QueryResultRow } from "pg"
+import { QueryResult, QueryResultRow } from 'pg';
 
 // Structural type both `Pool` and `PoolClient` satisfy — lets every
 // concurrency-lab repository below accept either a plain `pool` (each call
@@ -10,5 +10,5 @@ import { QueryResult, QueryResultRow } from "pg"
 // not a query builder — see the "No ORM" / "SQL First" constraints this
 // laboratory was built under.
 export type QueryExecutor = {
-  query<T extends QueryResultRow = any>(text: string, params?: unknown[]): Promise<QueryResult<T>>
-}
+  query<T extends QueryResultRow = any>(text: string, params?: unknown[]): Promise<QueryResult<T>>;
+};

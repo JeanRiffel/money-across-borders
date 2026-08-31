@@ -1,23 +1,22 @@
-import { QueryExecutor } from "./query-executor"
+import { QueryExecutor } from './query-executor';
 
 export type WalletVersionRow = {
-  id: string
-  balance_minor_units: string // BIGINT comes back as a string from `pg`
-  version: number
-}
+  id: string;
+  balance_minor_units: string; // BIGINT comes back as a string from `pg`
+  version: number;
+};
 
 // Raw SQL against the real `wallets` table (see the `version` column added
 // by migrations/004_add_wallet_version.sql), deliberately outside
 // PostgresWalletRepository — see docs/concurrency-lab.md.
 export class WalletOptimisticRepository {
-
   async findWithVersion(executor: QueryExecutor, walletId: string): Promise<WalletVersionRow> {
     const result = await executor.query<WalletVersionRow>(
       `SELECT id, balance_minor_units, version FROM wallets WHERE id = $1`,
       [walletId]
-    )
-    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`)
-    return result.rows[0]
+    );
+    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`);
+    return result.rows[0];
   }
 
   // Concept: Optimistic Concurrency
@@ -41,7 +40,7 @@ export class WalletOptimisticRepository {
        SET balance_minor_units = $1, version = version + 1
        WHERE id = $2 AND version = $3`,
       [newBalanceMinorUnits, walletId, expectedVersion]
-    )
-    return (result.rowCount ?? 0) > 0
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 }

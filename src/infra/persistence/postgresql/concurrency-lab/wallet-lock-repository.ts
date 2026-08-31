@@ -1,10 +1,10 @@
-import { QueryExecutor } from "./query-executor"
+import { QueryExecutor } from './query-executor';
 
 export type WalletBalanceRow = {
-  id: string
-  balance_minor_units: string // BIGINT comes back as a string from `pg`
-  version: number
-}
+  id: string;
+  balance_minor_units: string; // BIGINT comes back as a string from `pg`
+  version: number;
+};
 
 // Raw SQL against the real `wallets` table — deliberately outside
 // PostgresWalletRepository/the domain Wallet entity, so the two techniques
@@ -12,14 +12,13 @@ export type WalletBalanceRow = {
 // docs/concurrency-lab.md for the concept/SQL/behavior writeup this
 // repository backs.
 export class WalletLockRepository {
-
   async findById(executor: QueryExecutor, walletId: string): Promise<WalletBalanceRow> {
     const result = await executor.query<WalletBalanceRow>(
       `SELECT id, balance_minor_units, version FROM wallets WHERE id = $1`,
       [walletId]
-    )
-    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`)
-    return result.rows[0]
+    );
+    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`);
+    return result.rows[0];
   }
 
   // Concept: Pessimistic Lock
@@ -37,16 +36,23 @@ export class WalletLockRepository {
     const result = await executor.query<WalletBalanceRow>(
       `SELECT id, balance_minor_units, version FROM wallets WHERE id = $1 FOR UPDATE`,
       [walletId]
-    )
-    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`)
-    return result.rows[0]
+    );
+    if (!result.rows[0]) throw new Error(`wallet ${walletId} not found`);
+    return result.rows[0];
   }
 
   // Used after findByIdForUpdate, inside the same transaction/lock, to write
   // back a balance computed from the locked read — the lock is what makes
   // this plain, unconditional UPDATE safe here.
-  async setBalance(executor: QueryExecutor, walletId: string, balanceMinorUnits: number): Promise<void> {
-    await executor.query(`UPDATE wallets SET balance_minor_units = $1 WHERE id = $2`, [balanceMinorUnits, walletId])
+  async setBalance(
+    executor: QueryExecutor,
+    walletId: string,
+    balanceMinorUnits: number
+  ): Promise<void> {
+    await executor.query(`UPDATE wallets SET balance_minor_units = $1 WHERE id = $2`, [
+      balanceMinorUnits,
+      walletId,
+    ]);
   }
 
   // Concept: Atomic Update
@@ -59,21 +65,29 @@ export class WalletLockRepository {
   // against the current row, and either applies the change or matches zero
   // rows. The affected-row count is the only signal the caller needs to know
   // whether the debit happened.
-  async debitAtomic(executor: QueryExecutor, walletId: string, amountMinorUnits: number): Promise<boolean> {
+  async debitAtomic(
+    executor: QueryExecutor,
+    walletId: string,
+    amountMinorUnits: number
+  ): Promise<boolean> {
     const result = await executor.query(
       `UPDATE wallets
        SET balance_minor_units = balance_minor_units - $1
        WHERE id = $2 AND balance_minor_units >= $1`,
       [amountMinorUnits, walletId]
-    )
-    return (result.rowCount ?? 0) > 0
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
-  async creditAtomic(executor: QueryExecutor, walletId: string, amountMinorUnits: number): Promise<boolean> {
+  async creditAtomic(
+    executor: QueryExecutor,
+    walletId: string,
+    amountMinorUnits: number
+  ): Promise<boolean> {
     const result = await executor.query(
       `UPDATE wallets SET balance_minor_units = balance_minor_units + $1 WHERE id = $2`,
       [amountMinorUnits, walletId]
-    )
-    return (result.rowCount ?? 0) > 0
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 }

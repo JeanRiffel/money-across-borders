@@ -1,6 +1,6 @@
-import { PoolClient } from "pg"
+import { PoolClient } from 'pg';
 
-export type IsolationLevel = "READ COMMITTED" | "REPEATABLE READ" | "SERIALIZABLE"
+export type IsolationLevel = 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
 
 // Concept: Isolation Level
 // SQL:      BEGIN;
@@ -29,14 +29,14 @@ export async function runInIsolatedTransaction<T>(
   level: IsolationLevel,
   work: () => Promise<T>
 ): Promise<T> {
-  await client.query("BEGIN")
-  await client.query(`SET TRANSACTION ISOLATION LEVEL ${level}`)
+  await client.query('BEGIN');
+  await client.query(`SET TRANSACTION ISOLATION LEVEL ${level}`);
   try {
-    const result = await work()
-    await client.query("COMMIT")
-    return result
+    const result = await work();
+    await client.query('COMMIT');
+    return result;
   } catch (error) {
-    await client.query("ROLLBACK")
-    throw error
+    await client.query('ROLLBACK');
+    throw error;
   }
 }

@@ -53,12 +53,23 @@ for functional/concurrency/load testing — see [docs/seed.md](docs/seed.md) for
 its documented deviations from the live HTTP flow (e.g. it can seed KYC/remittance statuses the real use
 cases never persist today).
 
+## Runtime: Node/npm is canonical
+
+**Node + npm is the canonical toolchain** — `.github/workflows/ci.yml`, the `Dockerfile`, `package-lock.json`,
+and the Husky pre-commit hook all use it, and every script except `npm start` runs on plain `ts-node`. `bun`
+appears in exactly one place: `npm start` shells out to `nodemon --exec bun run ...` for local dev
+convenience — everything else (`npm run dev`, `npm run dev:watch`, tests, lint, migrations, workers) uses
+`ts-node`/Jest/ESLint directly and needs no Bun install. Use `npm install`/`npm run <script>` unless you
+specifically want that one script's Bun-based dev loop; a committed `bun.lock` exists for that path but isn't
+what CI or Docker builds from.
+
 ## Commands
 
-There is no `node_modules` installed in this environment — run `bun install` or `npm install` first.
+There is no `node_modules` installed in this environment — run `npm install` first (or `bun install` if you
+specifically want `npm start`'s Bun-based dev loop — see "Runtime" above).
 
 ```bash
-bun install              # or npm install
+npm install               # canonical; `bun install` also works, see "Runtime" above
 
 npm test                 # run all tests (jest)
 npm test -- <pattern>    # run a subset, e.g. npm test -- create-account
@@ -81,7 +92,7 @@ npm run dev               # ts-node src/main/server.ts
 npm run dev:watch
 
 npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_treasury_wallets.sql +
-                           # 003_create_outbox_events.sql
+                           # 003_create_outbox_events.sql + 004_add_wallet_version.sql
 
 npm run worker:account-created     # consumes account.created from RabbitMQ, simulates a confirmation email
 npm run worker:remittance-indexer  # consumes remittance.completed from Kafka, indexes it into Elasticsearch
@@ -100,11 +111,12 @@ isolation-level/idempotency mechanics specifically (raw SQL against real `wallet
 rows, kept out of the production write path) are covered in
 [docs/concurrency-lab.md](docs/concurrency-lab.md).
 
-**CI and local hooks**: a GitHub Actions workflow (`.github/workflows/ci.yml`) runs `lint`, `format:check`,
-and `test` on every push and pull request targeting `main`; it is not currently a required status check, so
-a red run doesn't block merging a PR. A Husky pre-commit hook (`.husky/pre-commit`, wired up via the
-`prepare` script so it's installed automatically by `bun install`/`npm install`) runs `npm test` locally
-before every commit.
+**CI and local hooks**: a GitHub Actions workflow (`.github/workflows/ci.yml`) has two jobs — `fast` (`lint`,
+`format:check`, `test`; needs no infrastructure) on every push/PR to `main`, and `integration` (migrations,
+`test:integration`, `test:concurrency`, a seed smoke run, all against real Postgres/Redis service
+containers) on the same triggers. Neither is currently a required status check, so a red run doesn't block
+merging a PR. A Husky pre-commit hook (`.husky/pre-commit`, wired up via the `prepare` script so it's
+installed automatically by `npm install`) runs `npm test` locally before every commit.
 
 ## Architecture
 
@@ -129,3 +141,49 @@ unfamiliar.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,
 `authMiddleware`, `createJWTService()` factory) if working on authentication.
+
+## Important invariants
+
+This is a financial system — [docs/invariants.md](docs/invariants.md) is the source of truth for what's
+actually **guaranteed** (double-entry balancing, wallet non-negative balance, idempotent claim/save/release,
+`UnitOfWork` atomicity, ...) versus merely **intended** versus a **known violation** (e.g. concurrent debits
+on the same wallet aren't isolation-safe today — no row lock is taken; a wallet opened with a nonzero
+`initialBalanceMinorUnits` has no matching ledger entries). Read it before touching money, wallets, ledger
+entries, remittances, or idempotency, and update it in the same change if you alter one of these guarantees.
+[docs/adr/](docs/adr/) records *why* the major decisions behind these invariants were made (Postgres as
+source of truth, the Transactional Outbox, Redis-backed idempotency, RabbitMQ vs Kafka, Elasticsearch as a
+read model, treasury wallets, `UnitOfWork`).
+
+## Development workflow and Definition of Done
+
+Recommended flow for any non-trivial change: **Understand → Inspect → Plan → Implement → Test → Review →
+Validate** — see [docs/workflow.md](docs/workflow.md) for what each step means concretely in this repo
+(narrowest test first, wiring order, when to actually reach for `test:integration`/`test:concurrency`).
+A change isn't done because it compiles — see [docs/definition-of-done.md](docs/definition-of-done.md) for
+the checklist (tests, lint, format, affected invariants, docs kept in sync, no unrelated changes, security
+considered) before calling any non-trivial task finished.
+
+## Rules for modifying this repository
+
+- Don't weaken a **Guaranteed** invariant from [docs/invariants.md](docs/invariants.md) — double-entry
+  balancing, non-negative balances, idempotent claim/save/release, `UnitOfWork` atomicity — without calling
+  it out explicitly; never do it silently as a side effect of an unrelated change.
+- Don't bypass `authMiddleware`, weaken JWT verification, or otherwise loosen authentication/authorization
+  without being explicitly asked to — including *not* building new features on top of the known
+  `accountId`-isn't-checked-against-the-token gap as if it were acceptable long-term behavior (see
+  "Known inconsistencies" above).
+- Never commit secrets or credentials; `.env` is real local config, `.env.example` is the template — don't
+  put a real value in the latter.
+- Don't run destructive database commands (`--reset`, `TRUNCATE`, dropping tables) or apply migrations
+  against anything but your own local/dev Postgres without explicit authorization — `/db-migrate` and
+  `/seed-data` are manual-only for exactly this reason (see "Skills" in `CLAUDE.md`).
+- Don't silently rewrite an already-applied migration; add a new numbered one instead, additive by default
+  (see the migration files under `src/infra/persistence/postgresql/migrations/` for the existing style).
+- Don't change production configuration (`.env`, `docker-compose.yml`, CI secrets) without being explicitly
+  asked to.
+- Keep changes scoped to what was asked — this repo documents its own known gaps deliberately (see "Known
+  inconsistencies"); don't "fix" one in passing as part of an unrelated task without flagging it first.
+
+For AI-agent-specific tooling: Claude Code skills live under `.claude/skills/` (see `CLAUDE.md`); GitHub
+Copilot's repository-level instructions are in `.github/copilot-instructions.md` and path-specific ones in
+`.github/instructions/` — both point back to this file as the canonical source rather than duplicating it.

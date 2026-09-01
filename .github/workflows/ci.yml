@@ -7,7 +7,11 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  # No external services needed — lint, formatting, and the in-memory Jest
+  # suite (see AGENTS.md "Commands"). Runs on every push/PR; keep this job
+  # fast, it's the one most likely to run many times per change.
+  fast:
+    name: Fast checks (lint, format, unit tests)
     runs-on: ubuntu-latest
 
     steps:
@@ -29,5 +33,78 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
-      - name: Run tests
+      - name: Run unit tests
         run: npm test
+
+  # Everything that needs a real, migrated Postgres (and, for the Cucumber
+  # suite, Redis — buildApp() fails fast without either, see AGENTS.md).
+  # Kept as a separate job from `fast` so a lint/format/unit failure surfaces
+  # quickly without waiting on service containers to boot, and so this job's
+  # runtime doesn't gate the fast feedback loop. Provisioned via GitHub
+  # Actions `services:` — no separate compose/infra step, and nothing here
+  # touches RabbitMQ/Kafka/Elasticsearch/Mongo, since none of the suites run
+  # here exercise them (see docs/infrastructure.md for what each backs).
+  integration:
+    name: Integration & concurrency checks (Postgres + Redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: scaling_app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d scaling_app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DATABASE: scaling_app
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      # CI-only value — never a real secret, and not used outside this job.
+      JWT_SECRET: ci-integration-test-secret
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Run integration tests (Cucumber, real Express app + Postgres + Redis)
+        run: npm run test:integration
+
+      - name: Run concurrency lab (real Postgres locking/isolation/idempotency)
+        run: npm run test:concurrency
+
+      - name: Run seed pipeline integration tests (real Postgres)
+        run: npm run test:seed

@@ -22,8 +22,11 @@ until invoked, so adding more doesn't cost tokens on every turn.
 | `/concurrency-lab` | `npm run test:concurrency` | See [docs/concurrency-lab.md](docs/concurrency-lab.md). Needs a migrated Postgres. Manual-only. |
 | `/lint-format` | `npm run lint:fix && npm run format` | Not covered by the Husky pre-commit hook (which only runs `npm test`). |
 | `/docker-stack` | `docker compose up --build` | Full stack — app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + workers. Manual-only, heavyweight. |
+| `/review` | (no command — reads the diff directly) | Read-only structured review against this project's architecture/invariants/concurrency/security concerns — see [docs/invariants.md](docs/invariants.md). Never edits files. Manual-only. |
 
-Skills marked manual-only (`disable-model-invocation: true`) touch a real database, the filesystem broadly,
-or spin up containers — they only run when a user explicitly asks (via `/name`), never inferred by Claude
-from conversation context. Add new skills the same way: point `allowed-tools` narrowly at the command(s)
-the skill needs, and link back to the relevant `docs/*.md` instead of duplicating it.
+Skills marked manual-only (`disable-model-invocation: true`) either touch a real database, the filesystem
+broadly, or spin up containers, or (like `/review`) represent a deliberate, heavier pass the user should
+trigger explicitly rather than one Claude reaches for on its own — they only run when a user explicitly asks
+(via `/name`), never inferred by Claude from conversation context. Add new skills the same way: point
+`allowed-tools` narrowly at what the skill actually needs, and link back to the relevant `docs/*.md` instead
+of duplicating it.

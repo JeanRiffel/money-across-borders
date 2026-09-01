@@ -42,6 +42,13 @@ describe('Wallet', () => {
     expect(() => wallet.debit(Money.fromMinorUnits(600, usd))).toThrow(InsufficientFundsError)
   })
 
+  it('should allow a debit exactly equal to the balance, leaving zero', () => {
+    const wallet = buildWallet(500)
+    const debited = wallet.debit(Money.fromMinorUnits(500, usd))
+
+    expect(debited.getBalance().getAmountMinorUnits()).toEqual(0)
+  })
+
   it('should reject credit/debit in a different currency', () => {
     const wallet = buildWallet(1000)
     expect(() => wallet.credit(Money.fromMinorUnits(100, brl))).toThrow(CurrencyMismatchError)

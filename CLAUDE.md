@@ -27,6 +27,7 @@ until invoked, so adding more doesn't cost tokens on every turn.
 Skills marked manual-only (`disable-model-invocation: true`) either touch a real database, the filesystem
 broadly, or spin up containers, or (like `/review`) represent a deliberate, heavier pass the user should
 trigger explicitly rather than one Claude reaches for on its own — they only run when a user explicitly asks
-(via `/name`), never inferred by Claude from conversation context. Add new skills the same way: point
+(via `/name`), never inferred by Claude from conversation context. See [docs/safety.md](docs/safety.md) for
+this same boundary generalized across all tooling, not just Claude skills. Add new skills the same way: point
 `allowed-tools` narrowly at what the skill actually needs, and link back to the relevant `docs/*.md` instead
 of duplicating it.

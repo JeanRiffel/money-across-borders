@@ -53,6 +53,32 @@ for functional/concurrency/load testing — see [docs/seed.md](docs/seed.md) for
 its documented deviations from the live HTTP flow (e.g. it can seed KYC/remittance statuses the real use
 cases never persist today).
 
+## How agent instructions are organized
+
+Each file below has authority over a specific concern; none should duplicate what another already states —
+if a rule seems to need writing in two places, it belongs once in whichever file is listed as authoritative
+here, and the other links to it instead.
+
+- **AGENTS.md** (this file) — canonical, tool-agnostic engineering rules: what this project is, commands,
+  architecture map, invariants pointer, the standard workflow, and the hard rules in "Rules for modifying
+  this repository" below. Read this first, regardless of which agent/tool is reading it.
+- **`docs/*.md`** — the deep dives this file links out to instead of inlining: domain/architecture knowledge
+  ([architecture.md](docs/architecture.md), [infrastructure.md](docs/infrastructure.md)), what's actually
+  guaranteed ([invariants.md](docs/invariants.md)), documented gaps ([known-issues.md](docs/known-issues.md)),
+  process ([workflow.md](docs/workflow.md), [definition-of-done.md](docs/definition-of-done.md),
+  [safety.md](docs/safety.md)), and narrow how-tos ([seed.md](docs/seed.md),
+  [concurrency-lab.md](docs/concurrency-lab.md)). `docs/adr/` records *why* past decisions were made, not
+  current rules.
+- **`.github/instructions/*.instructions.md`** — path-scoped restatements of AGENTS.md/`docs/` for one area
+  (domain/application, persistence, tests), auto-applied by Copilot via each file's `applyTo` glob when a
+  matching file is open/changed. Not a separate source of truth — if one of these ever says something
+  AGENTS.md doesn't, treat that as a bug in the instructions file, not new policy.
+- **`.github/copilot-instructions.md`** — Copilot's fixed entry point; points back to AGENTS.md and adds
+  nothing new.
+- **`CLAUDE.md`** and **`.claude/skills/`** — Claude-Code-specific mechanisms only (skills, hooks, slash
+  commands). `CLAUDE.md` itself is just a pointer to this file plus a table of skills that wrap the commands
+  documented below.
+
 ## Runtime: Node/npm is canonical
 
 **Node + npm is the canonical toolchain** — `.github/workflows/ci.yml`, the `Dockerfile`, `package-lock.json`,
@@ -164,6 +190,11 @@ the checklist (tests, lint, format, affected invariants, docs kept in sync, no u
 considered) before calling any non-trivial task finished.
 
 ## Rules for modifying this repository
+
+See [docs/safety.md](docs/safety.md) for these rules organized as three tiers (safe / requires the user to
+have actually asked / requires explicit human approval every time) alongside this repo's actual tooling
+(manual-only skills, non-blocking CI). This section remains the authoritative source; safety.md is a
+scannable index of it, not a second copy of the policy.
 
 - Don't weaken a **Guaranteed** invariant from [docs/invariants.md](docs/invariants.md) — double-entry
   balancing, non-negative balances, idempotent claim/save/release, `UnitOfWork` atomicity — without calling

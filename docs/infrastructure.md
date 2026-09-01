@@ -36,7 +36,9 @@ boot**, none of them a correctness guarantee for the account/wallet/remittance w
 
 ## Environment / running
 
-There is no `node_modules` installed in this environment — run `bun install` or `npm install` first.
+There is no `node_modules` installed in this environment — run `npm install` first (canonical toolchain;
+see "Runtime: Node/npm is canonical" in [AGENTS.md](../AGENTS.md) for why `bun` also appears here and
+where it's actually needed).
 
 Copy `.env.example` to `.env` before running the server; it needs `JWT_SECRET`, `POSTGRES_HOST`/
 `POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DATABASE`, `REDIS_HOST`/`REDIS_PORT`/

@@ -33,7 +33,7 @@ the change; most changes won't touch all of them.
       changed without being explicitly asked for; no destructive DB command run without explicit
       authorization; no weakening of authentication/authorization or of a financial consistency guarantee
       without calling it out plainly. See "Rules for modifying this repository" in
-      [AGENTS.md](../AGENTS.md).
+      [AGENTS.md](../AGENTS.md) and the tiered breakdown in [safety.md](safety.md).
 
 For non-trivial changes, do the review pass yourself before calling it done — read the diff back, check it
 against the items above, and only then hand it off. See [docs/workflow.md](workflow.md) for the recommended

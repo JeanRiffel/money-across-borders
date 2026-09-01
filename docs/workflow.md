@@ -43,3 +43,22 @@ repository, for coding agents and humans alike:
 This flow scales down naturally — a one-line typo fix doesn't need a written plan or the full test matrix,
 just don't skip step 7 (review the diff) even for small changes; it's the cheapest step and catches the most
 avoidable mistakes.
+
+## Task categories (quick-reference)
+
+Not a required classification step — skip it when a task's shape is already obvious. Useful when it isn't,
+to jump straight to the docs/skills that actually apply instead of re-deriving them:
+
+| Category | Start with | Test/skill |
+|---|---|---|
+| Domain/application logic | [architecture.md](architecture.md), `.github/instructions/domain.instructions.md` | `/run-tests` |
+| Database/persistence | `.github/instructions/persistence.instructions.md`, [invariants.md](invariants.md) | `/db-migrate`, `test:integration` |
+| Concurrency/locking | [concurrency-lab.md](concurrency-lab.md), invariants.md "Wallet"/"Transactional consistency" | `/concurrency-lab` |
+| Messaging/events | architecture.md's `EventPublisher`/Outbox bullets, [infrastructure.md](infrastructure.md) | `worker:*` scripts |
+| Infrastructure/Docker | infrastructure.md | `/docker-stack` |
+| Tests | `.github/instructions/tests.instructions.md` | `/run-tests` |
+| Documentation | [known-issues.md](known-issues.md) — check before "fixing" a documented gap in passing | — |
+| Security/auth | AGENTS.md "Rules for modifying this repository", [safety.md](safety.md) | `/review` |
+
+This is a lookup aid, not new guidance — every cell links to something that already exists elsewhere in this
+document set.

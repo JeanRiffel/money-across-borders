@@ -155,7 +155,11 @@ Postgres-native equivalent demonstrated in `docs/concurrency-lab.md`).
   case; the rest either replay the first one's saved response (if it finished) or get
   `IdempotencyKeyInFlightError` (if it's still running). **Guaranteed**, and specifically guaranteed *against
   the race*, not just against sequential retries — this was a real, since-fixed bug (see
-  [known-issues.md](known-issues.md)).
+  [known-issues.md](known-issues.md)). `IdempotentDecorator`'s own replay/in-flight/release semantics are
+  covered directly in `__tests__/application/shared/idempotency/idempotent-decorator.test.ts`; the guarantee
+  applied specifically to remittance creation (retry returns the same result without a second debit, and N
+  concurrent `POST /remittances` calls sharing a key settle exactly once) is covered in
+  `__tests__/application/use-cases/remittance/send-remittance-idempotency.test.ts`.
 - **A caller-supplied key is required to get this guarantee.** Controllers fall back to a freshly generated
   UUID per request when no `Idempotency-Key` header (or body field) is present (see the `IdempotentDecorator`
   bullet in [architecture.md](architecture.md)) — a keyless retry is treated as a brand-new request and *will*

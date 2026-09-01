@@ -18,10 +18,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Matches the Dockerfile's node:22-bookworm-slim (not required by this
+      # job itself, but kept in step with `integration` below rather than
+      # drifting to its own Node version).
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -88,10 +91,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # @cucumber/cucumber (test:integration) declares engines: "22 || 24 ||
+      # >=26" — this job was stuck on node-version: 20 since its creation and
+      # never actually ran; 22 matches both the package's requirement and the
+      # Dockerfile's node:22-bookworm-slim.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies

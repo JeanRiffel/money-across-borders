@@ -6,12 +6,10 @@ DDD, SOLID, ACID transactions, idempotency, and horizontal scalability** using a
 domain. It's still, first and foremost, an architecture showcase: the payments domain is the vehicle, not
 the point.
 
-> Note: the "Domain Overview," "Core Use Cases," and "Clean Architecture Structure" sections below predate
-> the cross-border pivot and describe the project's original account/ledger framing — see
-> [AGENTS.md](AGENTS.md) for the current domain model (wallets, ledger, exchange, compliance, remittance).
-> The "Technology Choices & Responsibilities" and "Running Locally" sections have been refreshed to match
-> what's actually implemented today; see [docs/infrastructure.md](docs/infrastructure.md) and
-> [docs/architecture.md](docs/architecture.md) for the full detail behind them.
+> Note: every section below has been refreshed to match what's actually implemented today. See
+> [AGENTS.md](AGENTS.md) for the canonical, tool-agnostic project overview, and
+> [docs/architecture.md](docs/architecture.md) / [docs/infrastructure.md](docs/infrastructure.md) for the
+> full detail behind the summaries here.
 
 This project is intentionally **small in surface area** (few endpoints) and **deep in architectural concepts**, focusing on correctness, consistency, and scalability rather than feature sprawl.
 
@@ -34,22 +32,36 @@ This is not a tutorial project — it mirrors **real-world payment and ledger sy
 
 ## 🧠 Domain Overview
 
-The system manages **accounts and ledger entries**.
+The system manages **accounts, multi-currency wallets, and cross-border remittances**, organized around
+seven bounded contexts: `user`, `account`, `wallet`, `ledger`, `exchange`, `compliance`, and `remittance`.
 
-All balance changes are recorded as immutable ledger entries (double-entry style), ensuring:
+* A **`User`** is the identity/authentication aggregate (email + password hash) — it's what you log in as.
+* An **`Account`** is the financial/ledger relationship that everything else references by id. It
+  deliberately carries no credentials of its own (`Account.userId` is nullable — the system treasury
+  account has no human owner at all).
+* An **`Account`** holds one or more currency-denominated **`Wallet`**s.
+* Every balance change on a wallet is recorded as an immutable, double-entry **ledger entry** — never a
+  bare balance mutation.
+* A **`Remittance`** converts money from one wallet's currency to another's via a (mocked) FX rate,
+  posting through system-owned per-currency **treasury wallets** so each currency's ledger stays balanced
+  independently.
+* A basic **compliance/KYC** check (`KycProfile`) gates how much an unverified sender can move in a single
+  remittance.
 
-* Auditability
-* Traceability
-* Strong consistency
+This double-entry, immutable-ledger design gives the system auditability, traceability, and strong
+consistency by construction.
 
 ### Core Use Cases
 
-* Create an account
-* Credit an account
-* Debit an account
-* Transfer between accounts
-* Query account balance
-* List ledger entries
+Reachable end-to-end over HTTP today (interactive docs for all of them at `GET /docs`):
+
+* `POST /account` — create an account (provisions a `User` + `Account` together)
+* `POST /login` — authenticate by email/password, receive a JWT
+* `POST /wallets` — open a currency wallet on an account (requires a JWT)
+* `POST /kyc` — submit KYC (auto-verified synchronously today — see
+  [docs/known-issues.md](docs/known-issues.md))
+* `POST /remittances` — send a cross-currency remittance between wallets (requires a JWT)
+* `GET /remittances` — search remittances (CQRS read model, see below)
 
 ---
 
@@ -206,32 +218,34 @@ debit race on the same wallet.
 
 ## 🧱 Clean Architecture Structure
 
+Organized **by layer first, then by bounded context** (`user`, `account`, `wallet`, `ledger`, `exchange`,
+`compliance`, `remittance`) — see [docs/architecture.md](docs/architecture.md) for the full map and the
+patterns to follow when extending it (use cases, the idempotency decorator, `UnitOfWork`, the Transactional
+Outbox, `EventPublisher`, the CQRS read side, and more):
+
 ```
 src/
- ├── domain/
- │    ├── entities/
- │    ├── value-objects/
- │    ├── repositories/
- │    └── domain-services/
- │
- ├── application/
- │    ├── use-cases/
- │    ├── dto/
- │    └── ports/
- │
- ├── infrastructure/
- │    ├── db/
- │    │    ├── postgres/
- │    │    ├── mongo/
- │    │    └── redis/
- │    ├── messaging/
- │    │    └── rabbitmq/
- │    └── web/
- │         └── controllers/
- │
- └── main/
-      ├── server.ts
-      └── di.ts
+ ├── domain/<context>/         entities, value objects, repository interfaces (ports) — no framework deps
+ │    └── shared/              cross-context domain: Clock, errors, Money/Currency value objects
+ ├── application/<context>/    use cases + DTOs, orchestrate domain objects
+ │    └── shared/              cross-cutting ports: authentication, idempotency, exchange, compliance,
+ │                             pricing, transaction (UnitOfWork), events (EventPublisher)
+ ├── infra/                    concrete adapters implementing domain/application ports
+ │    ├── authentication/      JWTService
+ │    ├── config/              Postgres/Mongo/Redis/Elasticsearch clients, RabbitMQ/Kafka connections
+ │    ├── events/              EventPublisher adapters + standalone consumer/relay processes
+ │    ├── observability/       Pino logger, Prometheus metrics, OpenTelemetry tracing
+ │    ├── resilience/          timeout/retry/backoff/circuit-breaker for outbound calls
+ │    ├── compliance/          InMemoryComplianceChecker (mocked business rule)
+ │    ├── exchange/            MockExchangeRateProvider + HttpExchangeRateProvider (mocked FX)
+ │    ├── pricing/             FlatPercentageFeeCalculator (mocked)
+ │    ├── factories/           wire concrete adapters into a use case
+ │    ├── persistence/         postgresql/, redis/, elasticsearch/, mongodb/, in-memory/ (what tests use)
+ │    ├── security/            BcryptPasswordHasher
+ │    └── time/                SystemClock
+ ├── interfaces/http/          Express-facing layer: controllers, routes, middlewares, Swagger docs
+ └── main/                     composition root: server.ts bootstraps Express + DI; <context>-module.ts
+                                builds each use case from injected dependencies
 ```
 
 Dependencies always point **inward**.
@@ -240,12 +254,17 @@ Dependencies always point **inward**.
 
 ## 🌐 Scalability Approach
 
+This is the **target design**, not what's running today — see
+[docs/known-issues.md](docs/known-issues.md):
+
 * Stateless API nodes
 * Horizontal scaling via NGINX
 * Shared infrastructure services
-* Safe concurrent processing via SERIALIZABLE transactions
+* 🚧 Safe concurrent processing via `SERIALIZABLE` transactions / row locking — not implemented; see the
+  🚧 note under "PostgreSQL — Source of Truth" above
 
-This setup can be scaled locally using Docker Compose and mirrors real production environments.
+Today: a single Express instance (see "Architecture Overview" above), no NGINX, and Postgres transactions
+run at the default isolation level with no row locking.
 
 ---
 

@@ -11,10 +11,28 @@ import { SystemClock } from '../time/system-clock';
 import { postgresRegistry } from '../persistence/postgresql/postgres-registry';
 import { redisRegistry } from '../persistence/redis/redis-registry';
 import { MockExchangeRateProvider } from '../exchange/mock-exchange-rate-provider';
+import { HttpExchangeRateProvider } from '../exchange/http-exchange-rate-provider';
+import { ExchangeRateProvider } from 'src/application/shared/exchange/exchange-rate-provider';
 import { InMemoryComplianceChecker } from '../compliance/in-memory-compliance-checker';
 import { FlatPercentageFeeCalculator } from '../pricing/flat-percentage-fee-calculator';
 import { KafkaEventPublisher } from '../events/kafka-event-publisher';
 import { ElasticsearchRemittanceSearchIndex } from '../persistence/elasticsearch/elasticsearch-remittance-search-index';
+
+// FX_PROVIDER opt-in switch: defaults to the static MockExchangeRateProvider
+// (unchanged production behavior) unless explicitly set to "http", which
+// wires HttpExchangeRateProvider — a real HTTP call guarded by
+// resilient-http-client.ts (timeout/retry/backoff/circuit breaker) — against
+// FX_PROVIDER_URL (see fake-fx-server.ts / docs/resilience.md for what's
+// meant to run at that URL; nothing does by default). Kept opt-in rather
+// than the new default so this feature demonstrates the resilience layer
+// without changing SendRemittanceUseCase's existing behavior/latency profile
+// for every caller.
+function createExchangeRateProvider(): ExchangeRateProvider {
+  if (process.env.FX_PROVIDER === 'http') {
+    return new HttpExchangeRateProvider(process.env.FX_PROVIDER_URL || 'http://localhost:4010');
+  }
+  return new MockExchangeRateProvider();
+}
 
 // No seedTreasuryWallets() call here (unlike the old in-memory-backed
 // version of this factory): the treasury account + its per-currency wallets
@@ -29,7 +47,7 @@ export async function createSendRemittanceUseCase(): Promise<
     walletRepository: postgresRegistry.walletRepository,
     ledgerRepository: postgresRegistry.ledgerRepository,
     remittanceRepository: postgresRegistry.remittanceRepository,
-    exchangeRateProvider: new MockExchangeRateProvider(),
+    exchangeRateProvider: createExchangeRateProvider(),
     complianceChecker: new InMemoryComplianceChecker(postgresRegistry.kycProfileRepository),
     feeCalculator: new FlatPercentageFeeCalculator(),
     // See the equivalent comment in account-factory.ts.

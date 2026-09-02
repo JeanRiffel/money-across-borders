@@ -2,11 +2,6 @@
 
 ## Known inconsistencies (check before relying on these paths)
 
-- `README.md` still largely describes the pre-pivot account/ledger framing (and a `src/infrastructure/` /
-  `src/domain/entities|value-objects|repositories` layout that never matched the real tree, which uses
-  `src/infra/` and per-context subfolders like `src/domain/account/entities/...`). Its title/intro was
-  updated for the cross-border pivot; the rest was not. Trust [architecture.md](architecture.md) and the
-  actual tree over the README's body.
 - Postgres persistence is functional (`account-factory.ts`, `wallet-factory.ts`, `remittance-factory.ts`,
   `user-factory.ts`, `compliance-factory.ts` all wire to `postgres-registry.ts` for everything except
   idempotency — see [architecture.md](architecture.md)); Mongo persistence is now functional too, but

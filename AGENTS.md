@@ -163,9 +163,8 @@ pattern, and test layout.
 
 ## Known inconsistencies
 
-Several files are mid-refactor, stubbed, or documented inaccurately elsewhere in the repo (e.g. `README.md`
-still describes the pre-pivot layout). See [docs/known-issues.md](docs/known-issues.md) before relying on a
-path you haven't checked yourself, and for a history of previously-fixed bugs in case behavior looks
+Several files are mid-refactor or stubbed. See [docs/known-issues.md](docs/known-issues.md) before relying
+on a path you haven't checked yourself, and for a history of previously-fixed bugs in case behavior looks
 unfamiliar.
 
 See `JWT_IMPLEMENTATION.md` for the JWT auth flow in detail (`JWTService.generate`/`verify`,

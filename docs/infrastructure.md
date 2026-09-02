@@ -19,7 +19,11 @@ boot**, none of them a correctness guarantee for the account/wallet/remittance w
   (`EventPublisher`'s contract is "must not throw," so nothing surfaced that loss). A separate relay worker
   (`npm run worker:outbox-relay`) polls that table and is the only thing that actually publishes to
   RabbitMQ, consumed in turn by another standalone worker (`npm run worker:account-created`) that simulates
-  sending a confirmation email. A task-queue-shaped job — one event, one consumer, no replay needed.
+  sending a confirmation email. A task-queue-shaped job — one event, one consumer, no replay needed. That
+  worker also now connects to Redis (unlike the app process, this isn't optional for it — see
+  [resilience.md](resilience.md)): a failed delivery is retried via a broker-native retry/DLQ topology, and
+  the Redis-backed `IdempotencyRepository` (the same store/port `IdempotentDecorator` uses) guards against
+  duplicate processing on redelivery.
 - **Kafka**: `SendRemittanceUseCase` publishes `remittance.completed` after its transaction commits, consumed
   by a standalone worker (`npm run worker:remittance-indexer`) that indexes it into Elasticsearch. An
   event-stream-shaped job instead — a business fact a consumer group can replay, chosen over RabbitMQ for
@@ -81,6 +85,9 @@ HTTP server regardless of `CMD`, so it can't be reused for a different process a
 shouldn't hold up boot. `worker-outbox-relay` is the one worker that also depends on `postgres` being
 *healthy* (not just started, unlike the other two workers) — it polls `outbox_events` directly, the same
 table `CreateAccountUseCase` writes to, so it needs a real, migrated Postgres to have anything to read.
+`worker-account-created` similarly depends on `redis` being *healthy* (see the Redis retry/idempotency note
+above) — it now fails fast (`process.exit(1)`) on an unreachable Redis at startup, the same posture
+`server.ts` has, not the non-fatal-degrade posture it has toward RabbitMQ itself.
 
 Host-side ports default away from each service's standard port (`6380` not `6379`, `5673`/`15673` not
 `5672`/`15672`, `9094` not `9092`, `9201` not `9200`) so `docker compose up` here doesn't collide with a

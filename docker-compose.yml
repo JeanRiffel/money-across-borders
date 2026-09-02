@@ -190,12 +190,22 @@ services:
     depends_on:
       rabbitmq:
         condition: service_started
+      # Now also load-bearing for this worker specifically (fails fast the
+      # same way server.ts does, not non-fatal like rabbitmq above): its
+      # retry/DLQ idempotency guard (see docs/resilience.md) reads/writes
+      # the same Redis-backed IdempotencyRepository the HTTP-facing
+      # decorator uses. service_healthy, matching how the `app` service
+      # itself waits on redis below, not just service_started.
+      redis:
+        condition: service_healthy
     entrypoint: ["npx", "ts-node", "src/infra/events/consumers/account-created-consumer.ts"]
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
   # Separate long-running process consuming remittance.completed and

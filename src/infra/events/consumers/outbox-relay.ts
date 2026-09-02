@@ -41,6 +41,13 @@ async function relayOnce(): Promise<void> {
       channel.sendToQueue(event.topic, Buffer.from(JSON.stringify(event.payload)), {
         persistent: true,
         contentType: 'application/json',
+        // Stable dedupe key for the consumer's idempotency guard (see
+        // account-created-consumer.ts) — the outbox row's own id, so
+        // duplicate delivery/redelivery of the *same* logical event always
+        // carries the same messageId, across both a raw broker redelivery
+        // and this project's own retry-queue republish (which forwards this
+        // property verbatim rather than minting a new one).
+        messageId: event.id,
       });
       await postgresRegistry.outboxRepository.markPublished(event.id);
       logger.info(

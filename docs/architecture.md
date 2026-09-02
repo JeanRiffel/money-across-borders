@@ -36,22 +36,28 @@ src/
  │    │                        kafka}-connection.ts all call dotenv.config() themselves; see
  │    │                        [infrastructure.md](infrastructure.md)
  │    ├── config/message-broker/ rabbitmq-connection.ts and kafka-connection.ts — the real, used connection
- │    │                        modules. rabbitmq-connection.ts's siblings rabbitmq-producer.ts/
- │    │                        rabbitmq-consumer.ts are dead, pre-pivot leftovers that don't even compile
- │    │                        (import domain/transaction/... paths that no longer exist) — the actual
- │    │                        producer/consumers live in events/ below, not here
+ │    │                        modules, plus rabbitmq-retry-topology.ts (the account.created retry/DLQ queue
+ │    │                        topology — see the Resilience bullet below). rabbitmq-connection.ts's other
+ │    │                        siblings rabbitmq-producer.ts/rabbitmq-consumer.ts are dead, pre-pivot
+ │    │                        leftovers that don't even compile (import domain/transaction/... paths that
+ │    │                        no longer exist) — the actual producer/consumers live in events/ below, not here
  │    ├── events/               EventPublisher adapters: InMemoryEventPublisher (records published events,
  │    │                        used in tests), RabbitMQEventPublisher + KafkaEventPublisher (real — never
  │    │                        throw, log+swallow their own connect/publish failures; see the EventPublisher
  │    │                        bullet below for which use case gets which — RabbitMQEventPublisher itself is
  │    │                        currently unused by any factory, see the Transactional Outbox bullet).
  │    │                        consumers/ holds three separate long-running processes — account-created-
- │    │                        consumer.ts (npm run worker:account-created), remittance-completed-indexer.ts
+ │    │                        consumer.ts (npm run worker:account-created — see the Resilience bullet below
+ │    │                        for its retry/DLQ/idempotency behavior), remittance-completed-indexer.ts
  │    │                        (npm run worker:remittance-indexer), and outbox-relay.ts (npm run
  │    │                        worker:outbox-relay) — none is part of buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
+ │    ├── resilience/           timeout/retry/backoff/circuit-breaker for synchronous external-provider
+ │    │                        calls — see the Resilience bullet below and [resilience.md](resilience.md)
  │    ├── compliance/          InMemoryComplianceChecker — fixed threshold rule, mocked
- │    ├── exchange/            MockExchangeRateProvider — static rate table, mocked
+ │    ├── exchange/            MockExchangeRateProvider (static rate table, mocked, still the default) and
+ │    │                        HttpExchangeRateProvider (real HTTP call through resilience/, opt-in via
+ │    │                        FX_PROVIDER=http) — see the Resilience bullet below
  │    ├── pricing/             FlatPercentageFeeCalculator — mocked
  │    ├── factories/           wire concrete adapters into a use case (e.g. account-factory.ts, remittance-factory.ts)
  │    ├── persistence/         postgresql/ (the repos every factory wires to for everything except
@@ -206,6 +212,22 @@ Key patterns to follow when extending this code:
   imported. Like Mongo/RabbitMQ/Kafka/Elasticsearch (see [infrastructure.md](infrastructure.md)), a
   failed/unreachable Loki or Tempo is non-fatal — only the Postgres and Redis checks inside `buildApp()`
   block boot.
+- **Resilience** (`infra/resilience/`): timeout, retry with exponential backoff+jitter, and a circuit
+  breaker for synchronous external-provider calls, built on `cockatiel` — confined entirely to
+  `resilient-http-client.ts`, the only module in the codebase that imports it; everything else (starting
+  with `HttpExchangeRateProvider` in `infra/exchange/`) depends only on plain functions and this project's
+  own error types (`errors.ts`), never on cockatiel directly, so the application layer's port
+  (`ExchangeRateProvider`) stays ignorant of which HTTP/retry/circuit-breaker library backs it. Retry
+  classification (`retry-classifier.ts`) and the backoff+jitter formula (`backoff.ts`) are both pure,
+  dependency-free functions, independently unit-tested. `HttpExchangeRateProvider` is opt-in
+  (`FX_PROVIDER=http` in `remittance-factory.ts`; `MockExchangeRateProvider` stays the default) against a
+  deterministic local `fake-fx-server.ts` (also what its own tests exercise) rather than a real paid FX API.
+  The same retry/backoff shape backs `account-created-consumer.ts`'s RabbitMQ retry queue (via
+  `rabbitmq-retry-topology.ts`'s dead-letter-exchange-based delay, not an in-process sleep) and its
+  Redis-backed idempotent-consumer guard (reusing `IdempotencyRepository`/`redisRegistry`, the same port
+  `IdempotentDecorator` uses — see the Idempotency bullet above). See [resilience.md](resilience.md) for the
+  full design (why each concern is separate, what's retried and why, circuit states, the RabbitMQ topology,
+  and the delivery/idempotency guarantees this project actually makes).
 - **Cross-currency ledger balancing**: a single transaction can't balance directly across two currencies.
   System-owned **treasury wallets** (one per supported currency, owned by the reserved
   `TREASURY_ACCOUNT_ID` in `domain/wallet/treasury-account.ts`, seeded via `seed-treasury-wallets.ts`) act

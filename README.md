@@ -129,7 +129,10 @@ Backs exactly one flow today: the simulated account-confirmation email. `npm run
 polls `outbox_events` (default every 5s) and is the only thing that actually publishes to RabbitMQ; `npm
 run worker:account-created` consumes `account.created` off it and logs a simulated "email sent" line. A
 task-queue-shaped job — one event, one consumer, no replay needed — which is why it went through the
-outbox above rather than a direct `publish()` call.
+outbox above rather than a direct `publish()` call. A failed delivery is retried (broker-native delay,
+`x-retry-count` in message headers) before landing in a `account.created.dlq` dead-letter queue, and
+duplicate deliveries are deduped via the same Redis-backed idempotency store the HTTP layer uses — see
+[docs/resilience.md](docs/resilience.md).
 
 ### Kafka — Event Stream (optional, non-fatal)
 

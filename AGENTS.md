@@ -63,12 +63,12 @@ here, and the other links to it instead.
   architecture map, invariants pointer, the standard workflow, and the hard rules in "Rules for modifying
   this repository" below. Read this first, regardless of which agent/tool is reading it.
 - **`docs/*.md`** — the deep dives this file links out to instead of inlining: domain/architecture knowledge
-  ([architecture.md](docs/architecture.md), [infrastructure.md](docs/infrastructure.md)), what's actually
-  guaranteed ([invariants.md](docs/invariants.md)), documented gaps ([known-issues.md](docs/known-issues.md)),
-  process ([workflow.md](docs/workflow.md), [definition-of-done.md](docs/definition-of-done.md),
-  [safety.md](docs/safety.md)), and narrow how-tos ([seed.md](docs/seed.md),
-  [concurrency-lab.md](docs/concurrency-lab.md)). `docs/adr/` records *why* past decisions were made, not
-  current rules.
+  ([architecture.md](docs/architecture.md), [infrastructure.md](docs/infrastructure.md),
+  [resilience.md](docs/resilience.md)), what's actually guaranteed ([invariants.md](docs/invariants.md)),
+  documented gaps ([known-issues.md](docs/known-issues.md)), process ([workflow.md](docs/workflow.md),
+  [definition-of-done.md](docs/definition-of-done.md), [safety.md](docs/safety.md)), and narrow how-tos
+  ([seed.md](docs/seed.md), [concurrency-lab.md](docs/concurrency-lab.md)). `docs/adr/` records *why* past
+  decisions were made, not current rules.
 - **`.github/instructions/*.instructions.md`** — path-scoped restatements of AGENTS.md/`docs/` for one area
   (domain/application, persistence, tests), auto-applied by Copilot via each file's `applyTo` glob when a
   matching file is open/changed. Not a separate source of truth — if one of these ever says something
@@ -123,6 +123,9 @@ npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_tr
 npm run worker:account-created     # consumes account.created from RabbitMQ, simulates a confirmation email
 npm run worker:remittance-indexer  # consumes remittance.completed from Kafka, indexes it into Elasticsearch
 npm run worker:outbox-relay        # polls Postgres outbox_events and publishes unpublished rows to RabbitMQ
+
+npm run demo:fake-fx-server  # deterministic local FX HTTP server — see docs/resilience.md; pair with
+                              # FX_PROVIDER=http to exercise HttpExchangeRateProvider's resilience layer
 
 docker compose up --build # app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + all three workers
                            # above, in containers — no local install needed

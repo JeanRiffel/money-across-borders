@@ -2,14 +2,20 @@ import { EventPublisher } from '../../application/shared/events/event-publisher'
 import { getKafkaProducer } from '../config/message-broker/kafka-connection';
 import { logger } from '../observability/logger';
 
-// Kafka counterpart to RabbitMQEventPublisher — same EventPublisher port,
-// different broker underneath, chosen per event by whichever factory wires
-// it in (see remittance-factory.ts vs account-factory.ts). SendRemittanceUseCase
-// takes this one: remittance.completed is a stream of business facts a
-// consumer group can replay/re-read (today: the Elasticsearch indexer;
-// plausibly others later — analytics, audit), not a one-shot task queue
-// item the way account.created is. See CLAUDE.md's EventPublisher note for
-// the full RabbitMQ-vs-Kafka reasoning.
+// No longer wired to any factory — remittance-factory.ts used to construct
+// this directly for SendRemittanceUseCase, but remittance.completed now
+// goes through the Transactional Outbox instead (see OutboxRepository /
+// kafka-outbox-relay.ts), same move CreateAccountUseCase/account.created
+// made earlier to RabbitMQEventPublisher, and for the same reason: this
+// adapter's "never throws" contract meant a failed/unreachable broker
+// silently lost the event with no way to retry. Kept anyway, same
+// precedent as RabbitMQEventPublisher/PostgresIdempotencyRepository (still
+// correct, just unused) — a plain best-effort EventPublisher is still the
+// right shape for an event that's genuinely fine to lose occasionally.
+// kafka-outbox-relay.ts's own low-level Kafka producer calls deliberately
+// don't reuse this class, for the same reason outbox-relay.ts doesn't reuse
+// RabbitMQEventPublisher: its swallow-and-log behavior is exactly what a
+// relay must NOT have.
 export class KafkaEventPublisher implements EventPublisher {
   // Never throws (same contract as RabbitMQEventPublisher): a failed
   // connect/send is caught and logged here, not surfaced to the caller —

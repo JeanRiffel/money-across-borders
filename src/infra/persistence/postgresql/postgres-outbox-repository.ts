@@ -1,4 +1,5 @@
 import {
+  OutboxBroker,
   OutboxEventRecord,
   OutboxRepository,
 } from '../../../application/shared/events/outbox-repository';
@@ -8,6 +9,7 @@ type OutboxEventRow = {
   id: string;
   topic: string;
   payload: Record<string, unknown>;
+  broker: OutboxBroker;
   created_at: Date;
 };
 
@@ -16,36 +18,47 @@ function toRecord(row: OutboxEventRow): OutboxEventRecord {
     id: row.id,
     topic: row.topic,
     payload: row.payload,
+    broker: row.broker,
     createdAt: row.created_at,
   };
 }
 
 export class PostgresOutboxRepository implements OutboxRepository {
   // Called via getExecutor(), same as every other Postgres*Repository — so
-  // when this runs inside unitOfWork.runInTransaction(...) (the only place
-  // CreateAccountUseCase calls it), it transparently joins that transaction
-  // instead of auto-committing on its own connection. That's the entire
-  // guarantee this pattern relies on: this INSERT either commits together
-  // with the User + Account rows, or rolls back together with them — never
-  // one without the other.
-  async add(topic: string, payload: Record<string, unknown>): Promise<void> {
-    await getExecutor().query(`INSERT INTO outbox_events (topic, payload) VALUES ($1, $2)`, [
-      topic,
-      JSON.stringify(payload),
-    ]);
+  // when this runs inside unitOfWork.runInTransaction(...) (CreateAccountUseCase
+  // and SendRemittanceUseCase, today), it transparently joins that
+  // transaction instead of auto-committing on its own connection. That's the
+  // entire guarantee this pattern relies on: this INSERT either commits
+  // together with the business rows it accompanies, or rolls back together
+  // with them — never one without the other.
+  async add(
+    topic: string,
+    payload: Record<string, unknown>,
+    broker: OutboxBroker = 'rabbitmq'
+  ): Promise<void> {
+    await getExecutor().query(
+      `INSERT INTO outbox_events (topic, payload, broker) VALUES ($1, $2, $3)`,
+      [topic, JSON.stringify(payload), broker]
+    );
   }
 
-  // Used only by the relay process (see outbox-relay.ts), never inside a
-  // business transaction — deliberately not called via getExecutor()'s
-  // transaction-joining behavior for anything beyond that default pool
-  // fallback, since the relay has no surrounding UnitOfWork of its own.
-  async findUnpublished(limit: number): Promise<OutboxEventRecord[]> {
+  // Used only by a relay process (outbox-relay.ts for 'rabbitmq',
+  // kafka-outbox-relay.ts for 'kafka'), never inside a business transaction
+  // — deliberately not called via getExecutor()'s transaction-joining
+  // behavior for anything beyond that default pool fallback, since a relay
+  // has no surrounding UnitOfWork of its own. broker scopes each relay to
+  // only the rows it's responsible for — see migrations/
+  // 005_add_outbox_broker_column.sql.
+  async findUnpublished(
+    limit: number,
+    broker: OutboxBroker = 'rabbitmq'
+  ): Promise<OutboxEventRecord[]> {
     const result = await getExecutor().query<OutboxEventRow>(
-      `SELECT id, topic, payload, created_at FROM outbox_events
-       WHERE published_at IS NULL
+      `SELECT id, topic, payload, broker, created_at FROM outbox_events
+       WHERE published_at IS NULL AND broker = $2
        ORDER BY created_at ASC
        LIMIT $1`,
-      [limit]
+      [limit, broker]
     );
     return result.rows.map(toRecord);
   }

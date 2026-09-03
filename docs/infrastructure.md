@@ -12,22 +12,27 @@ Postgres backs the account/wallet/ledger/remittance/KYC write path
 Beyond Postgres/Redis, four more pieces of infra are wired to specific, narrow jobs — all **non-fatal at
 boot**, none of them a correctness guarantee for the account/wallet/remittance write path itself:
 
-- **RabbitMQ**: `CreateAccountUseCase` no longer publishes `account.created` directly — it writes the event
+- **RabbitMQ**: `CreateAccountUseCase` doesn't publish `account.created` directly — it writes the event
   to a Postgres **Transactional Outbox** (`outbox_events`, inside the same transaction as the User + Account
   saves; see the Transactional Outbox bullet in [architecture.md](architecture.md)) instead, closing the gap
   where a broker outage or a crash between commit and publish used to lose the event silently
   (`EventPublisher`'s contract is "must not throw," so nothing surfaced that loss). A separate relay worker
-  (`npm run worker:outbox-relay`) polls that table and is the only thing that actually publishes to
-  RabbitMQ, consumed in turn by another standalone worker (`npm run worker:account-created`) that simulates
-  sending a confirmation email. A task-queue-shaped job — one event, one consumer, no replay needed. That
-  worker also now connects to Redis (unlike the app process, this isn't optional for it — see
-  [resilience.md](resilience.md)): a failed delivery is retried via a broker-native retry/DLQ topology, and
-  the Redis-backed `IdempotencyRepository` (the same store/port `IdempotentDecorator` uses) guards against
-  duplicate processing on redelivery.
-- **Kafka**: `SendRemittanceUseCase` publishes `remittance.completed` after its transaction commits, consumed
-  by a standalone worker (`npm run worker:remittance-indexer`) that indexes it into Elasticsearch. An
-  event-stream-shaped job instead — a business fact a consumer group can replay, chosen over RabbitMQ for
-  that reason (see the `EventPublisher` bullet in [architecture.md](architecture.md) for the full reasoning).
+  (`npm run worker:outbox-relay`) polls that table for its own broker's rows (`broker = 'rabbitmq'`) and is
+  the only thing that actually publishes to RabbitMQ, consumed in turn by another standalone worker
+  (`npm run worker:account-created`) that simulates sending a confirmation email. A task-queue-shaped job —
+  one event, one consumer, no replay needed. That worker also now connects to Redis (unlike the app process,
+  this isn't optional for it — see [resilience.md](resilience.md)): a failed delivery is retried via a
+  broker-native retry/DLQ topology, and the Redis-backed `IdempotencyRepository` (the same store/port
+  `IdempotentDecorator` uses) guards against duplicate processing on redelivery.
+- **Kafka**: `SendRemittanceUseCase` writes `remittance.completed` to that same Transactional Outbox too
+  (`broker = 'kafka'`), not by publishing directly — a separate relay worker
+  (`npm run worker:outbox-relay-kafka`), independent from the RabbitMQ one above, polls for its own rows and
+  is the only thing that actually publishes to Kafka. Consumed by a standalone worker
+  (`npm run worker:remittance-indexer`) that indexes it into Elasticsearch. An event-stream-shaped job
+  instead of task-queue-shaped — a business fact a consumer group can replay, chosen over RabbitMQ for that
+  reason (see the `EventPublisher` bullet in [architecture.md](architecture.md) for the full reasoning) —
+  but as of the outbox move above, that split is only about consumption shape, not about delivery durability
+  (both events are now equally durable).
 - **Elasticsearch**: backs `GET /remittances` only (`SearchRemittancesUseCase`, CQRS read side) — a
   denormalized, eventually-consistent projection kept in sync by the Kafka consumer above, never the
   destination of a write path itself. `RemittanceRepository` (Postgres) remains the source of truth; this
@@ -69,25 +74,27 @@ optional — an unreachable Loki/Tempo degrades gracefully rather than blocking 
 
 ## Docker
 
-`docker compose up --build` runs nine services: `postgres`, `redis`, `rabbitmq`, `kafka`, `elasticsearch`,
-`app`, `worker-account-created`, `worker-remittance-indexer`, and `worker-outbox-relay`. Mongo is the one
-intentionally left out — nothing in the current request path *requires* it (`POST /kyc` degrades to
-"dossier not archived" without it, same as RabbitMQ/Kafka/Elasticsearch degrade without theirs), so it isn't
-simulated just because `.env.example` lists it. `docker-entrypoint.sh` runs `npm run db:migrate` before
-starting the server on every container start, so no manual migration step is needed with this path. The
-`app` service builds from the repo's `Dockerfile` (multi-stage, `ts-node` + `tsconfig-paths` at runtime — no
-separate `tsc` build step, since several files import via the `src/...` baseUrl alias that plain compiled JS
-wouldn't resolve); all three `worker-*` services reuse the same image but override `entrypoint:` to run
-their consumer/relay script directly, bypassing `docker-entrypoint.sh` (which always runs migrations + the
-HTTP server regardless of `CMD`, so it can't be reused for a different process as-is). `app` depends on
-`postgres` and `redis` being healthy before starting (both are fatal-if-unreachable, see above) but only on
-`rabbitmq`/`kafka`/`elasticsearch` having *started* — not healthy — since all three are non-fatal and
-shouldn't hold up boot. `worker-outbox-relay` is the one worker that also depends on `postgres` being
-*healthy* (not just started, unlike the other two workers) — it polls `outbox_events` directly, the same
-table `CreateAccountUseCase` writes to, so it needs a real, migrated Postgres to have anything to read.
-`worker-account-created` similarly depends on `redis` being *healthy* (see the Redis retry/idempotency note
-above) — it now fails fast (`process.exit(1)`) on an unreachable Redis at startup, the same posture
-`server.ts` has, not the non-fatal-degrade posture it has toward RabbitMQ itself.
+`docker compose up --build` runs ten services: `postgres`, `redis`, `rabbitmq`, `kafka`, `elasticsearch`,
+`app`, `worker-account-created`, `worker-remittance-indexer`, `worker-outbox-relay`, and
+`worker-outbox-relay-kafka`. Mongo is the one intentionally left out — nothing in the current request path
+*requires* it (`POST /kyc` degrades to "dossier not archived" without it, same as RabbitMQ/Kafka/Elasticsearch
+degrade without theirs), so it isn't simulated just because `.env.example` lists it. `docker-entrypoint.sh`
+runs `npm run db:migrate` before starting the server on every container start, so no manual migration step is
+needed with this path. The `app` service builds from the repo's `Dockerfile` (multi-stage, `ts-node` +
+`tsconfig-paths` at runtime — no separate `tsc` build step, since several files import via the `src/...`
+baseUrl alias that plain compiled JS wouldn't resolve); all five `worker-*` services reuse the same image but
+override `entrypoint:` to run their consumer/relay script directly, bypassing `docker-entrypoint.sh` (which
+always runs migrations + the HTTP server regardless of `CMD`, so it can't be reused for a different process
+as-is). `app` depends on `postgres` and `redis` being healthy before starting (both are fatal-if-unreachable,
+see above) but only on `rabbitmq`/`kafka`/`elasticsearch` having *started* — not healthy — since all three
+are non-fatal and shouldn't hold up boot. `worker-outbox-relay` and `worker-outbox-relay-kafka` are the two
+workers that also depend on `postgres` being *healthy* (not just started, unlike the other two workers) —
+both poll `outbox_events` directly (each scoped to its own `broker` column value), so each needs a real,
+migrated Postgres to have anything to read; they're otherwise fully independent of each other, each
+depending on only its own broker (`rabbitmq`/`kafka` respectively) having started. `worker-account-created`
+similarly depends on `redis` being *healthy* (see the Redis retry/idempotency note above) — it now fails
+fast (`process.exit(1)`) on an unreachable Redis at startup, the same posture `server.ts` has, not the
+non-fatal-degrade posture it has toward RabbitMQ itself.
 
 Host-side ports default away from each service's standard port (`6380` not `6379`, `5673`/`15673` not
 `5672`/`15672`, `9094` not `9092`, `9201` not `9200`) so `docker compose up` here doesn't collide with a

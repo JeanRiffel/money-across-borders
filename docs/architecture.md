@@ -44,13 +44,14 @@ src/
  │    ├── events/               EventPublisher adapters: InMemoryEventPublisher (records published events,
  │    │                        used in tests), RabbitMQEventPublisher + KafkaEventPublisher (real — never
  │    │                        throw, log+swallow their own connect/publish failures; see the EventPublisher
- │    │                        bullet below for which use case gets which — RabbitMQEventPublisher itself is
- │    │                        currently unused by any factory, see the Transactional Outbox bullet).
- │    │                        consumers/ holds three separate long-running processes — account-created-
- │    │                        consumer.ts (npm run worker:account-created — see the Resilience bullet below
- │    │                        for its retry/DLQ/idempotency behavior), remittance-completed-indexer.ts
- │    │                        (npm run worker:remittance-indexer), and outbox-relay.ts (npm run
- │    │                        worker:outbox-relay) — none is part of buildApp()
+ │    │                        bullet below — both are currently unused by any factory, see the Transactional
+ │    │                        Outbox bullet). consumers/ holds four separate long-running processes —
+ │    │                        account-created-consumer.ts (npm run worker:account-created — see the
+ │    │                        Resilience bullet below for its retry/DLQ/idempotency behavior),
+ │    │                        remittance-completed-indexer.ts (npm run worker:remittance-indexer),
+ │    │                        outbox-relay.ts (npm run worker:outbox-relay, RabbitMQ), and
+ │    │                        kafka-outbox-relay.ts (npm run worker:outbox-relay-kafka, Kafka) — none is
+ │    │                        part of buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
  │    ├── resilience/           timeout/retry/backoff/circuit-breaker for synchronous external-provider
  │    │                        calls — see the Resilience bullet below and [resilience.md](resilience.md)
@@ -138,56 +139,66 @@ Key patterns to follow when extending this code:
   transaction commits, is two unrelated operations against two different systems — a broker outage, or a
   process crash in the exact window between the commit and the publish call, silently loses the event, and
   `EventPublisher`'s own "must not throw" contract (see below) means nothing ever surfaces that loss.
-  `CreateAccountUseCase` is the one consumer today: instead of publishing `account.created` to RabbitMQ
-  itself, it calls `outboxRepository.add('account.created', payload)` from *inside* `doExecute()` — i.e.
-  inside the same `unitOfWork.runInTransaction(...)` call as the `User` + `Account` saves — so the write to
-  `outbox_events` (`migrations/003_create_outbox_events.sql`) either commits together with the signup or
-  rolls back together with it; there's no window where one exists without the other.
-  `PostgresOutboxRepository` (`infra/persistence/postgresql/`) does a plain `INSERT`/`SELECT`/`UPDATE`
-  through the shared `getExecutor()`, same as every other `Postgres*Repository` — that's what makes `add()`
-  transparently join whatever transaction is in flight. A separate relay process
-  (`infra/events/consumers/outbox-relay.ts`, `npm run worker:outbox-relay`) polls `outbox_events` for
-  unpublished rows (default every 5s, `OUTBOX_RELAY_INTERVAL_MS`) and is the only thing that actually calls
-  RabbitMQ for these — deliberately *not* via `RabbitMQEventPublisher` (its swallow-and-log contract is
-  exactly wrong for a relay whose whole job is to notice a failed publish and retry it); a failed publish
-  just leaves the row unpublished for the next poll, no separate retry/backoff bookkeeping. `InMemoryOutboxRepository`
-  is the test fake, mirroring the rest of the in-memory stack. `SendRemittanceUseCase`/`remittance.completed`
-  does **not** go through the outbox — see the `EventPublisher` bullet below for why that gap is judged
-  acceptable there (Kafka's own retention already gives it a different safety net a task-queue event like
-  `account.created` doesn't have).
+  `CreateAccountUseCase` and `SendRemittanceUseCase` are both consumers today: instead of publishing
+  directly, each calls `outboxRepository.add(topic, payload, broker)` from *inside* `doExecute()` — i.e.
+  inside the same `unitOfWork.runInTransaction(...)` call as its own business-row saves — so the write to
+  `outbox_events` (`migrations/003_create_outbox_events.sql`, `005_add_outbox_broker_column.sql`) either
+  commits together with the business write or rolls back together with it; there's no window where one
+  exists without the other. `broker` (`'rabbitmq' | 'kafka'`, defaulting to `'rabbitmq'` on both `add()` and
+  `findUnpublished()`) is what lets one `outbox_events` table serve both: `CreateAccountUseCase`'s
+  `outboxRepository.add('account.created', payload)` call doesn't pass it at all (default applies) and
+  `SendRemittanceUseCase` passes `'kafka'` explicitly. `PostgresOutboxRepository`
+  (`infra/persistence/postgresql/`) does a plain `INSERT`/`SELECT`/`UPDATE` through the shared
+  `getExecutor()`, same as every other `Postgres*Repository` — that's what makes `add()` transparently join
+  whatever transaction is in flight.
+
+  Two separate relay processes exist, one per broker, deliberately kept as independent code rather than one
+  parameterized relay, so each can evolve its own retry/batching/backoff shape without the two brokers'
+  concerns entangled together — they only ever share the `outbox_events` table itself, scoped by `broker` so
+  neither ever claims a row the other owns:
+    - `infra/events/consumers/outbox-relay.ts` (`npm run worker:outbox-relay`, polls every 5s by default,
+      `OUTBOX_RELAY_INTERVAL_MS`) — `findUnpublished(limit)` (implicit `'rabbitmq'`), calls RabbitMQ.
+    - `infra/events/consumers/kafka-outbox-relay.ts` (`npm run worker:outbox-relay-kafka`, polls every 5s by
+      default, `KAFKA_OUTBOX_RELAY_INTERVAL_MS`) — `findUnpublished(limit, 'kafka')`, calls Kafka.
+
+  Both talk to their broker directly (`connectRabbitMQ()` / `getKafkaProducer()`) rather than through
+  `RabbitMQEventPublisher`/`KafkaEventPublisher` — those adapters' swallow-and-log contract is exactly wrong
+  for a relay whose whole job is to notice a failed publish and retry it; a failed publish just leaves the
+  row unpublished for the next poll, no separate retry/backoff bookkeeping beyond that. `InMemoryOutboxRepository`
+  is the test fake, mirroring the rest of the in-memory stack (its `findUnpublished` filters by `broker` too).
 - **`EventPublisher`** (`application/shared/events/event-publisher.ts`) publishes a domain event — a topic
   string + a plain payload — with a contract deliberately weaker than `UnitOfWork`'s: implementations
-  **must not throw**. Every event published through it is a best-effort side effect, not a correctness
-  guarantee — unlike a ledger write, losing one occasionally is acceptable. Two producers exist, each on a
-  different broker, deliberately — the broker is picked per event based on how it's meant to be consumed,
-  not "whichever queue already exists":
-    - `CreateAccountUseCase` → `account.created`, now via the Transactional Outbox above rather than a
-      direct `publish()` call — `RabbitMQEventPublisher` itself is unused by any factory today, kept only
-      as a correct, generic `EventPublisher` adapter (see its own file comment). Task-queue-shaped: one
-      event, one consumer (the simulated-email worker), no reason to replay it later — which is also why
-      only this one got the outbox treatment and `remittance.completed` below didn't.
-    - `SendRemittanceUseCase` → `remittance.completed` (after `unitOfWork.runInTransaction()` resolves — see
-      the `UnitOfWork` bullet above; published outside the transaction on purpose, so a remittance that ends
-      up rolled back can never have already announced itself as completed) → `KafkaEventPublisher`.
-      Event-stream-shaped: a business fact a consumer group can replay, and plausibly more than one
-      consumer wants over time (today: the Elasticsearch indexer; analytics/audit are the obvious next
-      ones) — Kafka's retention/replay model fits that, RabbitMQ's work-queue model doesn't.
+  **must not throw**. It's what the Transactional Outbox above exists to route around for both events this
+  codebase produces today — `RabbitMQEventPublisher` and `KafkaEventPublisher` are both unused by any
+  factory now, kept only as correct, generic `EventPublisher` adapters (see each one's own file comment) —
+  but the port and its contract still matter: it's the shape any future best-effort, fine-to-lose event
+  would use directly, without needing the outbox's stronger (and heavier) durability guarantee. The
+  RabbitMQ/Kafka split itself is unchanged by the outbox move — still picked per event by how it's meant to
+  be consumed:
+    - `account.created` (`CreateAccountUseCase`) → RabbitMQ. Task-queue-shaped: one event, one consumer (the
+      simulated-email worker), no reason to replay it later.
+    - `remittance.completed` (`SendRemittanceUseCase`) → Kafka. Event-stream-shaped: a business fact a
+      consumer group can replay, and plausibly more than one consumer wants over time (today: the
+      Elasticsearch indexer; analytics/audit are the obvious next ones) — Kafka's retention/replay model
+      fits that, RabbitMQ's work-queue model doesn't.
 
   Both adapters (`infra/events/`) catch and log their own connect/publish failures rather than propagating
-  them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in an array).
-  `SendRemittanceUseCase` takes its `EventPublisher` as a required constructor arg, same as it takes its
-  `UnitOfWork` — no default, so every construction site (factory, test) is explicit about which adapter it's
-  using; `CreateAccountUseCase` takes an `OutboxRepository` in that same required-constructor-arg slot
-  instead now (see the Transactional Outbox bullet above). Three separate consumer/relay processes exist in
-  `infra/events/consumers/`, none part of `buildApp()`:
+  them; `InMemoryEventPublisher` is the test/fake counterpart (records published events in an array). Both
+  `SendRemittanceUseCase` and `CreateAccountUseCase` take an `OutboxRepository` as a required constructor
+  arg now, same slot `EventPublisher` used to occupy — no default, so every construction site (factory,
+  test) is explicit about it (see the Transactional Outbox bullet above). Four separate consumer/relay
+  processes exist in `infra/events/consumers/`, none part of `buildApp()`:
     - `account-created-consumer.ts` (`npm run worker:account-created`) logs a simulated "confirmation email
       sent" line per event and acks.
     - `remittance-completed-indexer.ts` (`npm run worker:remittance-indexer`) indexes each event into
       Elasticsearch via `ElasticsearchRemittanceSearchIndex` (`infra/persistence/elasticsearch/`) — catches
       and logs its own indexing failures rather than crashing the consumer (same best-effort posture as
       `EventPublisher` itself), so a bad message is dropped, not retried forever.
-    - `outbox-relay.ts` (`npm run worker:outbox-relay`) is the producer side of the pair above — see the
-      Transactional Outbox bullet.
+    - `outbox-relay.ts` (`npm run worker:outbox-relay`) is the RabbitMQ producer side of the `account.created`
+      pair above — see the Transactional Outbox bullet.
+    - `kafka-outbox-relay.ts` (`npm run worker:outbox-relay-kafka`) is the Kafka producer side of the
+      `remittance.completed` pair above, kept as its own process rather than folded into `outbox-relay.ts` —
+      see the Transactional Outbox bullet.
 
   `GET /remittances` (`SearchRemittancesUseCase`) is the CQRS read side these two feed: it reads from
   Elasticsearch only, never Postgres, via `RemittanceSearchIndex`

@@ -7,7 +7,7 @@ import { InMemoryLedgerRepository } from '../../../../src/infra/persistence/in-m
 import { InMemoryRemittanceRepository } from '../../../../src/infra/persistence/in-memory/in-memory-remittance-repository'
 import { InMemoryKycProfileRepository } from '../../../../src/infra/persistence/in-memory/in-memory-kyc-profile-repository'
 import { InMemoryUnitOfWork } from '../../../../src/infra/persistence/in-memory/in-memory-unit-of-work'
-import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
+import { InMemoryOutboxRepository } from '../../../../src/infra/persistence/in-memory/in-memory-outbox-repository'
 import { seedTreasuryWallets } from '../../../../src/infra/persistence/in-memory/seed-treasury-wallets'
 import { MockExchangeRateProvider } from '../../../../src/infra/exchange/mock-exchange-rate-provider'
 import { InMemoryComplianceChecker } from '../../../../src/infra/compliance/in-memory-compliance-checker'
@@ -30,7 +30,7 @@ function buildScenario() {
   const ledgerRepository = new InMemoryLedgerRepository()
   const remittanceRepository = new InMemoryRemittanceRepository()
   const kycProfileRepository = new InMemoryKycProfileRepository()
-  const eventPublisher = new InMemoryEventPublisher()
+  const outboxRepository = new InMemoryOutboxRepository()
 
   const useCase = new SendRemittanceUseCase(
     walletRepository,
@@ -41,12 +41,12 @@ function buildScenario() {
     new FlatPercentageFeeCalculator(),
     clock,
     new InMemoryUnitOfWork(),
-    eventPublisher
+    outboxRepository
   )
 
   const openWallet = new OpenWalletUseCase(walletRepository, clock)
 
-  return { walletRepository, ledgerRepository, remittanceRepository, useCase, openWallet, clock, eventPublisher }
+  return { walletRepository, ledgerRepository, remittanceRepository, useCase, openWallet, clock, outboxRepository }
 }
 
 async function openAccountWithWallet(openWallet: OpenWalletUseCase, currency: string, initialBalanceMinorUnits = 0) {
@@ -95,8 +95,8 @@ describe('SendRemittanceUseCase', () => {
     expect(netByCurrency.get('BRL')).toEqual(0)
   })
 
-  it('publishes a remittance.completed event carrying the committed remittance', async () => {
-    const { walletRepository, useCase, openWallet, eventPublisher } = buildScenario()
+  it('writes a remittance.completed event to the outbox, in the same transaction as the remittance', async () => {
+    const { walletRepository, useCase, openWallet, outboxRepository } = buildScenario()
     await seedTreasuryWallets(walletRepository, new SystemClock())
 
     const senderAccountId = await openAccountWithWallet(openWallet, 'USD', 100_000)
@@ -110,10 +110,16 @@ describe('SendRemittanceUseCase', () => {
       amountMinorUnits: 10_000,
     }))
 
-    const publishedEvents = eventPublisher.getPublishedEvents()
-    expect(publishedEvents).toHaveLength(1)
-    expect(publishedEvents[0].topic).toEqual('remittance.completed')
-    expect(publishedEvents[0].payload).toMatchObject({
+    // Transactional Outbox, not a direct EventPublisher.publish() call (see
+    // the constructor comment on SendRemittanceUseCase) — a separate relay
+    // (kafka-outbox-relay.ts) is the only thing that actually delivers this
+    // to Kafka, so this test only asserts the outbox write, same shape as
+    // CreateAccountUseCase's own outbox test.
+    const outboxEvents = outboxRepository.getEvents()
+    expect(outboxEvents).toHaveLength(1)
+    expect(outboxEvents[0].topic).toEqual('remittance.completed')
+    expect(outboxEvents[0].broker).toEqual('kafka')
+    expect(outboxEvents[0].payload).toMatchObject({
       remittanceId: output.remittanceId,
       senderAccountId,
       recipientAccountId,

@@ -192,19 +192,25 @@ Postgres-native equivalent demonstrated in `docs/concurrency-lab.md`).
   transaction guarantees *atomicity* (all-or-nothing), not *isolation* from a concurrent transaction touching
   the same wallet row — no row lock is taken on the wallet reads inside it.
 - **Transactional Outbox** (`application/shared/events/outbox-repository.ts`,
-  `migrations/003_create_outbox_events.sql`): `CreateAccountUseCase` writes its `account.created` event to
-  `outbox_events` *inside* the same `UnitOfWork` transaction as the `User`/`Account` saves, instead of
-  publishing to RabbitMQ directly — so the event's durability is exactly as strong as the signup row's; there
-  is no window where one exists without the other. **Guaranteed** for `account.created`. A separate relay
-  process (`npm run worker:outbox-relay`) is the only thing that actually publishes these rows to RabbitMQ,
-  polling for unpublished rows and leaving a failed publish attempt for the next poll (no separate
-  retry/backoff bookkeeping beyond "try again next interval"). **Not used** for `remittance.completed` —
-  `SendRemittanceUseCase` publishes that one directly to Kafka via `EventPublisher`, *after* its transaction
-  commits, on purpose (so a rolled-back remittance can never have already announced itself as completed).
-  `EventPublisher`'s contract is "must not throw" — a lost `remittance.completed` publish is an accepted,
-  best-effort gap (it only affects the Elasticsearch search index, never the ledger/wallet/remittance source
-  of truth in Postgres). See the `EventPublisher` bullet in [architecture.md](architecture.md) for the full
-  reasoning on why these two events get different delivery guarantees.
+  `migrations/003_create_outbox_events.sql`, `005_add_outbox_broker_column.sql`): both `CreateAccountUseCase`
+  (`account.created`) and `SendRemittanceUseCase` (`remittance.completed`) write their event to
+  `outbox_events` *inside* the same `UnitOfWork` transaction as their own business-row saves, instead of
+  publishing to a broker directly — so each event's durability is exactly as strong as the row it accompanies;
+  there is no window where one exists without the other. **Guaranteed** for both `account.created` and
+  `remittance.completed` — a rolled-back remittance can never produce an outbox row at all, which is
+  strictly stronger than the previous post-commit `EventPublisher.publish()` call's own "ordered after
+  commit, but a crash/broker outage right after can still silently lose it" posture.
+
+  A row's `broker` column (`'rabbitmq' | 'kafka'`) says which relay owns it; two independent relay
+  processes exist, each claiming only its own broker's rows and never touching the other's:
+    - `npm run worker:outbox-relay` (`outbox-relay.ts`) — RabbitMQ, `account.created`.
+    - `npm run worker:outbox-relay-kafka` (`kafka-outbox-relay.ts`) — Kafka, `remittance.completed`.
+
+  Both poll for unpublished rows and leave a failed publish attempt for the next poll (no separate
+  retry/backoff bookkeeping beyond "try again next interval"). See the `EventPublisher` bullet in
+  [architecture.md](architecture.md) for why `account.created` and `remittance.completed` still go to
+  different brokers despite both now going through the outbox — that split is about consumption shape
+  (task-queue vs. replayable stream), not delivery durability, which is now the same for both.
 - **Ordering**: within one `UnitOfWork` transaction, statements run in the order the code issues them, and
   Postgres' own MVCC/locking rules apply to each individual statement — there is no additional
   application-level ordering guarantee beyond "everything in this transaction commits together, in the order

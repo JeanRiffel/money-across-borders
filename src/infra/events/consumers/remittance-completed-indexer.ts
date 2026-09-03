@@ -8,9 +8,12 @@ const GROUP_ID = 'remittance-completed-indexer';
 
 // Runs as a separate process from the HTTP server (see the worker:* npm
 // script), same shape as account-created-consumer.ts — not part of
-// buildApp(). Publishing (KafkaEventPublisher) and this consumer are
-// independent: nothing about SendRemittanceUseCase depends on this process
-// being up, same as account.created and its email worker.
+// buildApp(). Publishing happens via the Transactional Outbox now (see
+// SendRemittanceUseCase / kafka-outbox-relay.ts, npm run
+// worker:outbox-relay-kafka) rather than SendRemittanceUseCase calling
+// Kafka directly — this consumer and that relay are independent processes:
+// nothing about SendRemittanceUseCase depends on either being up, same as
+// account.created and its email worker.
 export const consumeRemittanceCompletedEvents = async (): Promise<void> => {
   const searchIndex = new ElasticsearchRemittanceSearchIndex();
   const consumer = createKafkaConsumer(GROUP_ID);

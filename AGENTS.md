@@ -123,6 +123,7 @@ npm run db:migrate        # applies migrations/001_init_schema.sql + 002_seed_tr
 npm run worker:account-created     # consumes account.created from RabbitMQ, simulates a confirmation email
 npm run worker:remittance-indexer  # consumes remittance.completed from Kafka, indexes it into Elasticsearch
 npm run worker:outbox-relay        # polls Postgres outbox_events and publishes unpublished rows to RabbitMQ
+npm run worker:outbox-relay-kafka  # polls Postgres outbox_events and publishes unpublished rows to Kafka
 
 npm run demo:fake-fx-server  # deterministic local FX HTTP server — see docs/resilience.md; pair with
                               # FX_PROVIDER=http to exercise HttpExchangeRateProvider's resilience layer

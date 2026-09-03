@@ -9,7 +9,7 @@ import { InMemoryRemittanceRepository } from '../../../../src/infra/persistence/
 import { InMemoryKycProfileRepository } from '../../../../src/infra/persistence/in-memory/in-memory-kyc-profile-repository'
 import { InMemoryUnitOfWork } from '../../../../src/infra/persistence/in-memory/in-memory-unit-of-work'
 import { InMemoryIdempotencyRepository } from '../../../../src/infra/persistence/in-memory/in-memory-idempotency-repository'
-import { InMemoryEventPublisher } from '../../../../src/infra/events/in-memory-event-publisher'
+import { InMemoryOutboxRepository } from '../../../../src/infra/persistence/in-memory/in-memory-outbox-repository'
 import { seedTreasuryWallets } from '../../../../src/infra/persistence/in-memory/seed-treasury-wallets'
 import { MockExchangeRateProvider } from '../../../../src/infra/exchange/mock-exchange-rate-provider'
 import { InMemoryComplianceChecker } from '../../../../src/infra/compliance/in-memory-compliance-checker'
@@ -30,7 +30,7 @@ function buildScenario() {
   const ledgerRepository = new InMemoryLedgerRepository()
   const remittanceRepository = new InMemoryRemittanceRepository()
   const kycProfileRepository = new InMemoryKycProfileRepository()
-  const eventPublisher = new InMemoryEventPublisher()
+  const outboxRepository = new InMemoryOutboxRepository()
   const idempotencyRepository = new InMemoryIdempotencyRepository()
 
   const sendRemittanceUseCase = new SendRemittanceUseCase(
@@ -42,7 +42,7 @@ function buildScenario() {
     new FlatPercentageFeeCalculator(),
     clock,
     new InMemoryUnitOfWork(),
-    eventPublisher
+    outboxRepository
   )
 
   const useCase = new IdempotentDecorator(sendRemittanceUseCase, idempotencyRepository)

@@ -12,7 +12,7 @@ import { ComplianceChecker } from 'src/application/shared/compliance/compliance-
 import { FeeCalculator } from 'src/application/shared/pricing/fee-calculator';
 import { IdempotencyRepository } from 'src/application/repositories/idempotency-repository';
 import { UnitOfWork } from 'src/application/shared/transaction/unit-of-work';
-import { EventPublisher } from 'src/application/shared/events/event-publisher';
+import { OutboxRepository } from 'src/application/shared/events/outbox-repository';
 import { Clock } from 'src/domain/shared/clock';
 import { SearchRemittancesUseCase } from 'src/application/remittance/uses-cases/search-remittances-use-case';
 import { SearchRemittancesInput } from 'src/application/remittance/dto/search-remittances-input';
@@ -29,7 +29,7 @@ export type RemittanceModuleDependencies = {
   idempotencyRepository: IdempotencyRepository;
   clock: Clock;
   unitOfWork: UnitOfWork;
-  eventPublisher: EventPublisher;
+  outboxRepository: OutboxRepository;
 };
 
 export function buildRemittanceModule(
@@ -46,7 +46,7 @@ export function buildRemittanceModule(
     deps.feeCalculator,
     deps.clock,
     deps.unitOfWork,
-    deps.eventPublisher
+    deps.outboxRepository
   );
 
   const idempotentSendRemittance = new IdempotentDecorator(

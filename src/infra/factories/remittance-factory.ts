@@ -15,7 +15,6 @@ import { HttpExchangeRateProvider } from '../exchange/http-exchange-rate-provide
 import { ExchangeRateProvider } from 'src/application/shared/exchange/exchange-rate-provider';
 import { InMemoryComplianceChecker } from '../compliance/in-memory-compliance-checker';
 import { FlatPercentageFeeCalculator } from '../pricing/flat-percentage-fee-calculator';
-import { KafkaEventPublisher } from '../events/kafka-event-publisher';
 import { ElasticsearchRemittanceSearchIndex } from '../persistence/elasticsearch/elasticsearch-remittance-search-index';
 
 // FX_PROVIDER opt-in switch: defaults to the static MockExchangeRateProvider
@@ -54,11 +53,18 @@ export async function createSendRemittanceUseCase(): Promise<
     idempotencyRepository: redisRegistry.idempotencyRepository,
     clock,
     unitOfWork: postgresRegistry.unitOfWork,
-    // remittance.completed → Kafka, not RabbitMQ (account.created's
-    // broker) — see CLAUDE.md's EventPublisher note for why: this is a
-    // stream of business facts a consumer group can replay, not a one-shot
-    // task queue item.
-    eventPublisher: new KafkaEventPublisher(),
+    // Transactional Outbox: remittance.completed is written here, inside the
+    // same transaction as the wallet/ledger/remittance saves, instead of
+    // being published to Kafka directly — see the constructor comment on
+    // SendRemittanceUseCase. Same shared outboxRepository instance
+    // account-factory.ts wires CreateAccountUseCase to (one outbox_events
+    // table, a broker column distinguishes the two — see
+    // migrations/005_add_outbox_broker_column.sql).
+    // worker:outbox-relay-kafka (src/infra/events/consumers/
+    // kafka-outbox-relay.ts) is the process that actually delivers these to
+    // Kafka; worker:outbox-relay (RabbitMQ) is a separate process and never
+    // touches these rows.
+    outboxRepository: postgresRegistry.outboxRepository,
   };
 
   return buildRemittanceModule(dependencies);

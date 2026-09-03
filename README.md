@@ -84,18 +84,23 @@ worker process; none of them sit on the request path, and all degrade non-fatall
 
 ```
 CreateAccountUseCase
-  → outbox_events (same Postgres transaction as the signup)
-  → worker:outbox-relay (polls the table)
+  → outbox_events (same Postgres transaction as the signup, broker='rabbitmq')
+  → worker:outbox-relay (polls the table for its own broker's rows)
   → RabbitMQ (account.created)
   → worker:account-created
   → logs a simulated confirmation email
 
 SendRemittanceUseCase
-  → Kafka (remittance.completed, published after the transaction commits)
+  → outbox_events (same Postgres transaction as the transfer, broker='kafka')
+  → worker:outbox-relay-kafka (polls the table for its own broker's rows)
+  → Kafka (remittance.completed)
   → worker:remittance-indexer
   → Elasticsearch
   → GET /remittances reads from here (CQRS read model; Postgres stays the source of truth)
 ```
+
+Both flows share one `outbox_events` table but are relayed by two independent worker processes, one per
+broker — see the Transactional Outbox notes below.
 
 A multi-node API behind an NGINX load balancer, as described further down in "Scalability Approach," is
 the target design, not what's running today — see [docs/known-issues.md](docs/known-issues.md).
@@ -116,9 +121,11 @@ transactional outbox (`outbox_events`).
 
 * ✅ ACID, atomic multi-write transactions (`UnitOfWork` — real `BEGIN`/`COMMIT`/`ROLLBACK` around
   `SendRemittanceUseCase`)
-* ✅ Transactional Outbox: `CreateAccountUseCase` writes `account.created` to `outbox_events` inside the
-  *same* transaction as the User + Account saves, closing the gap where a broker outage or crash between
-  commit and publish used to lose the event silently
+* ✅ Transactional Outbox: `CreateAccountUseCase` and `SendRemittanceUseCase` both write their event to
+  `outbox_events` inside the *same* transaction as their own business-row saves, closing the gap where a
+  broker outage or crash between commit and publish used to lose the event silently — a `broker` column
+  (`rabbitmq`/`kafka`) on each row is how one shared table serves two independent, broker-specific relay
+  workers
 * 🚧 `SERIALIZABLE` isolation, explicit row locking (`SELECT ... FOR UPDATE`), retry-on-serialization —
   not implemented; transactions run at Postgres's default isolation with no row locking on the wallet
   reads inside `SendRemittanceUseCase`. Atomicity (all-or-nothing) is guaranteed; concurrent-debit race
@@ -138,22 +145,23 @@ transactional outbox (`outbox_events`).
 ### RabbitMQ — Task Queue (optional, non-fatal)
 
 Backs exactly one flow today: the simulated account-confirmation email. `npm run worker:outbox-relay`
-polls `outbox_events` (default every 5s) and is the only thing that actually publishes to RabbitMQ; `npm
-run worker:account-created` consumes `account.created` off it and logs a simulated "email sent" line. A
-task-queue-shaped job — one event, one consumer, no replay needed — which is why it went through the
-outbox above rather than a direct `publish()` call. A failed delivery is retried (broker-native delay,
-`x-retry-count` in message headers) before landing in a `account.created.dlq` dead-letter queue, and
-duplicate deliveries are deduped via the same Redis-backed idempotency store the HTTP layer uses — see
-[docs/resilience.md](docs/resilience.md).
+polls `outbox_events` for its own broker's rows (`broker = 'rabbitmq'`, default every 5s) and is the only
+thing that actually publishes to RabbitMQ; `npm run worker:account-created` consumes `account.created` off
+it and logs a simulated "email sent" line. A task-queue-shaped job — one event, one consumer, no replay
+needed. A failed delivery is retried (broker-native delay, `x-retry-count` in message headers) before
+landing in a `account.created.dlq` dead-letter queue, and duplicate deliveries are deduped via the same
+Redis-backed idempotency store the HTTP layer uses — see [docs/resilience.md](docs/resilience.md).
 
 ### Kafka — Event Stream (optional, non-fatal)
 
-Backs the remittance search read model. `SendRemittanceUseCase` publishes `remittance.completed` after
-its transaction commits (published *outside* the transaction on purpose, so a rolled-back remittance can
-never have already announced itself as completed); `npm run worker:remittance-indexer` consumes it and
-indexes into Elasticsearch. An event-stream-shaped job — a business fact a consumer group can replay —
-chosen over RabbitMQ for that reason; it does **not** go through the transactional outbox, since Kafka's
-own retention already gives it a different safety net.
+Backs the remittance search read model. `SendRemittanceUseCase` writes `remittance.completed` to the same
+transactional outbox as above (`broker = 'kafka'`), inside its own transaction, rather than publishing
+directly — `npm run worker:outbox-relay-kafka` (its own independent process, separate from
+`worker:outbox-relay` above) polls for those rows and is the only thing that actually publishes to Kafka;
+`npm run worker:remittance-indexer` consumes it and indexes into Elasticsearch. An event-stream-shaped job
+— a business fact a consumer group can replay — chosen over RabbitMQ for that reason. Both `account.created`
+and `remittance.completed` now get the same outbox delivery guarantee; the RabbitMQ/Kafka split is purely
+about how each is meant to be consumed (task queue vs. replayable stream), not about durability.
 
 ### Elasticsearch — Remittance Search / CQRS Read Model (optional, non-fatal)
 
@@ -178,11 +186,13 @@ Pino structured logs (shipped to Loki if `LOKI_URL` is set), Prometheus RED metr
 and OpenTelemetry traces exported to Tempo. All three degrade gracefully — an unreachable Loki/Tempo
 doesn't block boot or fail a request.
 
-⚠️ Publishing to RabbitMQ/Kafka is deliberately **best-effort**, not `UnitOfWork`-grade: both
-`EventPublisher` adapters catch and log their own connect/publish failures instead of throwing. That's
-the right trade-off for a non-critical side effect like a confirmation email or a search index update —
-and the wrong one for an actual ledger write, which is why those still go through Postgres's real
-transactions above.
+⚠️ The `account.created`/`remittance.completed` **events themselves** are `UnitOfWork`-grade now (written
+to `outbox_events` inside the same transaction as the business write — see the Transactional Outbox bullet
+above); it's only each relay's actual broker call that stays best-effort-with-retry, never silently giving
+up (a failed publish just leaves the row for the next poll). `RabbitMQEventPublisher`/`KafkaEventPublisher`
+— the adapters that publish directly and swallow failures — are unused by any factory today for exactly
+that reason; they're kept as the right shape for a future event that's genuinely fine to lose occasionally,
+not for `account.created`/`remittance.completed` anymore.
 
 ---
 
@@ -277,7 +287,7 @@ run at the default isolation level with no row locking.
 docker compose up --build
 ```
 
-spins up nine services:
+spins up ten services:
 
   * `app` — the API (built from `Dockerfile`; runs migrations automatically on container start,
     depends on `postgres`/`redis` being healthy before it starts)
@@ -286,8 +296,9 @@ spins up nine services:
     section above)
   * `rabbitmq`, `kafka`, `elasticsearch` — optional at boot (`app` only waits for these to have
     *started*, not be healthy); back the RabbitMQ and Kafka/Elasticsearch pipelines above
-  * `worker-account-created`, `worker-remittance-indexer`, `worker-outbox-relay` — the three standalone
-    worker processes for the async pipelines diagrammed above
+  * `worker-account-created`, `worker-remittance-indexer`, `worker-outbox-relay`,
+    `worker-outbox-relay-kafka` — the four standalone worker processes for the async pipelines diagrammed
+    above (one relay per broker — see the Transactional Outbox bullet above for why they're kept separate)
 
 MongoDB is the one piece **not** in this compose file — nothing in the request path requires it, so it
 isn't simulated just because `.env.example` lists it; point `MONGO_HOST`/etc. in `.env` at an instance

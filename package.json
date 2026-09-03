@@ -64,6 +64,7 @@
     "worker:account-created": "ts-node src/infra/events/consumers/account-created-consumer.ts",
     "worker:remittance-indexer": "ts-node src/infra/events/consumers/remittance-completed-indexer.ts",
     "worker:outbox-relay": "ts-node src/infra/events/consumers/outbox-relay.ts",
+    "worker:outbox-relay-kafka": "ts-node src/infra/events/consumers/kafka-outbox-relay.ts",
     "demo:fake-fx-server": "ts-node src/infra/exchange/run-fake-fx-server.ts",
     "test": "jest",
     "test:watch": "jest --watch",

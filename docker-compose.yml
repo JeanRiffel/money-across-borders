@@ -1,15 +1,16 @@
 # Minimal container setup: Postgres and Redis are the two things the app
 # fails fast without (see CLAUDE.md's "What this is"). RabbitMQ, Kafka, and
-# Elasticsearch are included too, but as non-fatal dependencies —
-# remittance.completed (see src/infra/events/) degrades to "the search-index
-# update doesn't fire" rather than blocking boot or any write request if
-# Kafka/Elasticsearch are unreachable; GET /remittances is the only thing
-# that actually needs Elasticsearch. account.created is durable regardless
-# of RabbitMQ being reachable (see the Transactional Outbox note on
-# worker-outbox-relay below) — an unreachable broker there just means the
-# simulated confirmation email is delayed until it's back, not lost. Mongo
-# still exists in the codebase but isn't wired into any request path, so it
-# stays left out here rather than shipped unused.
+# Elasticsearch are included too, but as non-fatal dependencies — an
+# unreachable Elasticsearch degrades to "the search-index update doesn't
+# fire" rather than blocking boot or any write request; GET /remittances is
+# the only thing that actually needs Elasticsearch. Both account.created and
+# remittance.completed are durable regardless of RabbitMQ/Kafka being
+# reachable (see the Transactional Outbox note on worker-outbox-relay /
+# worker-outbox-relay-kafka below) — an unreachable broker there just means
+# the simulated confirmation email / search-index update is delayed until
+# it's back, not lost. Mongo still exists in the codebase but isn't wired
+# into any request path, so it stays left out here rather than shipped
+# unused.
 #
 # Host-side ports below default away from each service's standard port
 # (6380 not 6379, 5673/15673 not 5672/15672, 9094 not 9092, 9201 not 9200)
@@ -230,12 +231,18 @@ services:
   # Separate long-running process polling outbox_events (see
   # src/infra/events/consumers/outbox-relay.ts) and relaying unpublished
   # account.created rows to RabbitMQ — the Transactional Outbox's other
-  # half. CreateAccountUseCase only ever writes to Postgres now (inside its
-  # UnitOfWork transaction); without this running, those rows just sit
-  # unpublished and worker-account-created below never sees them. Needs
-  # postgres healthy (it polls outbox_events directly, same table
-  # CreateAccountUseCase writes to) unlike the other two workers above,
-  # which only depend on their broker having started.
+  # half for that event. CreateAccountUseCase only ever writes to Postgres
+  # now (inside its UnitOfWork transaction); without this running, those
+  # rows just sit unpublished and worker-account-created below never sees
+  # them. Needs postgres healthy (it polls outbox_events directly, same
+  # table CreateAccountUseCase writes to) unlike the other two workers
+  # above, which only depend on their broker having started. Kept fully
+  # separate from worker-outbox-relay-kafka below on purpose (own process,
+  # own entrypoint, own env) — same broker-per-responsibility split as the
+  # rest of this file; they only ever share the outbox_events table itself,
+  # scoped by that row's broker column (see
+  # migrations/005_add_outbox_broker_column.sql) so neither ever claims a
+  # row the other owns.
   worker-outbox-relay:
     build: .
     restart: unless-stopped
@@ -255,6 +262,32 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  # Kafka counterpart to worker-outbox-relay above (see
+  # src/infra/events/consumers/kafka-outbox-relay.ts) — relays unpublished
+  # remittance.completed rows to Kafka. SendRemittanceUseCase only ever
+  # writes to Postgres now (inside its UnitOfWork transaction); without this
+  # running, those rows just sit unpublished and worker-remittance-indexer
+  # never sees them, and GET /remittances's Elasticsearch index goes stale.
+  # Needs postgres healthy for the same reason worker-outbox-relay does.
+  worker-outbox-relay-kafka:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/kafka-outbox-relay.ts"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-scaling_app}
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_CLIENT_ID: money-across-borders-outbox-relay-kafka
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
 volumes:

@@ -16,7 +16,7 @@ import { ComplianceChecker } from '../../shared/compliance/compliance-checker';
 import { FeeCalculator } from '../../shared/pricing/fee-calculator';
 import { Clock } from '../../../domain/shared/clock';
 import { UnitOfWork } from '../../shared/transaction/unit-of-work';
-import { EventPublisher } from '../../shared/events/event-publisher';
+import { OutboxRepository } from '../../shared/events/outbox-repository';
 import {
   WalletNotFoundError,
   RecipientWalletNotFoundError,
@@ -35,38 +35,18 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
     private readonly feeCalculator: FeeCalculator,
     private readonly clock: Clock,
     private readonly unitOfWork: UnitOfWork,
-    private readonly eventPublisher: EventPublisher
+    private readonly outboxRepository: OutboxRepository
   ) {}
 
   // Wrapped in a single DB transaction (see UnitOfWork): a failure anywhere
-  // in here — after some but not all of the wallet/ledger/remittance saves
-  // below have run — rolls back everything instead of leaving a partially
-  // posted remittance. The in-memory implementation is a no-op passthrough,
-  // so this changes nothing about how tests exercise this use case.
+  // in here — after some but not all of the wallet/ledger/remittance/outbox
+  // saves below have run — rolls back everything instead of leaving a
+  // partially posted remittance, or a remittance.completed event for a
+  // transfer that never actually committed. The in-memory implementation is
+  // a no-op passthrough, so this changes nothing about how tests exercise
+  // this use case.
   async execute(input: SendRemittanceInput): Promise<SendRemittanceOutput> {
     const remittance = await this.unitOfWork.runInTransaction(() => this.doExecute(input));
-
-    // Published only after runInTransaction resolves — i.e. only once the
-    // transaction has actually committed. Publishing from inside
-    // doExecute() instead would risk announcing a remittance.completed
-    // event for a transaction that still rolls back afterward (e.g. a
-    // COMMIT-time failure) — EventPublisher's own "never throws" contract
-    // guards the other direction (a down Kafka can't fail an already-
-    // committed remittance), but can't undo a wrong ordering here.
-    await this.eventPublisher.publish('remittance.completed', {
-      remittanceId: remittance.getId().getValue(),
-      senderAccountId: remittance.getSenderAccountId().getValue(),
-      recipientAccountId: remittance.getRecipientAccountId().getValue(),
-      status: remittance.getStatus().getDescription(),
-      sourceCurrency: remittance.getSourceAmount().getCurrency().getCode(),
-      sourceAmountMinorUnits: remittance.getSourceAmount().getAmountMinorUnits(),
-      feeMinorUnits: remittance.getFee().getAmountMinorUnits(),
-      destinationCurrency: remittance.getConvertedAmount().getCurrency().getCode(),
-      convertedAmountMinorUnits: remittance.getConvertedAmount().getAmountMinorUnits(),
-      exchangeRate: remittance.getExchangeRate(),
-      createdAt: remittance.getCreatedAt().toISOString(),
-    });
-
     return SendRemittanceOutput.from(remittance);
   }
 
@@ -230,6 +210,38 @@ export class SendRemittanceUseCase implements UseCase<SendRemittanceInput, SendR
     );
 
     await this.remittanceRepository.save(remittance);
+
+    // Transactional Outbox (see OutboxRepository / CreateAccountUseCase for
+    // the same pattern applied to account.created/RabbitMQ): writing this
+    // *inside* doExecute() — i.e. inside the same unitOfWork.runInTransaction()
+    // call as every save above — means the row either commits together with
+    // the remittance or rolls back together with it; there's no window where
+    // a remittance.completed event exists for a transfer that didn't
+    // actually commit, and no window where the commit succeeds but the event
+    // is silently lost to a crash/broker outage right after. 'kafka' because
+    // this is a stream of business facts a consumer group can replay
+    // (today: the Elasticsearch indexer), not a one-shot task-queue item —
+    // see the EventPublisher bullet in docs/architecture.md.
+    // kafka-outbox-relay.ts (npm run worker:outbox-relay-kafka) is the only
+    // thing that actually publishes these rows to Kafka.
+    await this.outboxRepository.add(
+      'remittance.completed',
+      {
+        remittanceId: remittance.getId().getValue(),
+        senderAccountId: remittance.getSenderAccountId().getValue(),
+        recipientAccountId: remittance.getRecipientAccountId().getValue(),
+        status: remittance.getStatus().getDescription(),
+        sourceCurrency: remittance.getSourceAmount().getCurrency().getCode(),
+        sourceAmountMinorUnits: remittance.getSourceAmount().getAmountMinorUnits(),
+        feeMinorUnits: remittance.getFee().getAmountMinorUnits(),
+        destinationCurrency: remittance.getConvertedAmount().getCurrency().getCode(),
+        convertedAmountMinorUnits: remittance.getConvertedAmount().getAmountMinorUnits(),
+        exchangeRate: remittance.getExchangeRate(),
+        createdAt: remittance.getCreatedAt().toISOString(),
+      },
+      'kafka'
+    );
+
     return remittance;
   }
 

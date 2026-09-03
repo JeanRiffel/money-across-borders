@@ -40,6 +40,11 @@ const complianceRouter = (
    *               properties:
    *                 statusCode: { type: integer, example: 201 }
    *                 result: { $ref: '#/components/schemas/SubmitKycOutput' }
+   *       400:
+   *         description: Request body failed validation.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
    *       401:
    *         description: Missing or invalid bearer token.
    *       409:

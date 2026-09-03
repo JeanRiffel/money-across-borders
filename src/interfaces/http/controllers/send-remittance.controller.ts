@@ -11,6 +11,7 @@ import {
   UnsupportedCurrencyError,
   ExchangeRateNotAvailableError,
   IdempotencyKeyInFlightError,
+  ValidationError,
 } from 'src/domain/shared/errors';
 
 export class SendRemittanceController {
@@ -29,6 +30,9 @@ export class SendRemittanceController {
 
       return { statusCode: 201, result };
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return { statusCode: 400, result: error.message };
+      }
       if (error instanceof ComplianceRejectedError) {
         return { statusCode: 403, result: error.message };
       }

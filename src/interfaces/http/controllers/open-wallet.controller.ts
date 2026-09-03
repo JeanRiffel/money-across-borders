@@ -7,6 +7,7 @@ import {
   WalletAlreadyExistsError,
   UnsupportedCurrencyError,
   IdempotencyKeyInFlightError,
+  ValidationError,
 } from 'src/domain/shared/errors';
 
 // Postgres unique_violation. OpenWalletUseCase's find-then-insert isn't
@@ -34,6 +35,9 @@ export class OpenWalletController {
 
       return { statusCode: 201, result };
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return { statusCode: 400, result: error.message };
+      }
       if (error instanceof WalletAlreadyExistsError) {
         return { statusCode: 409, result: error.message };
       }

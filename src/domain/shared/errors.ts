@@ -84,3 +84,15 @@ export class IdempotencyKeyInFlightError extends Error {
     this.name = 'IdempotencyKeyInFlightError';
   }
 }
+
+export class ValidationError extends Error {
+  // Message is pre-formatted by the caller (see
+  // application/shared/validation/parse-or-throw.ts, which builds it from a
+  // zod issues list) rather than assembled here from structured args, unlike
+  // this file's other errors — the set of invalid fields is arbitrary and
+  // request-shaped, not a fixed set of named parameters.
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}

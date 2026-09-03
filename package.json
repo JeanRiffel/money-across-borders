@@ -52,7 +52,8 @@
     "redis": "^5.9.0",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "zod": "^4.5.4"
   },
   "scripts": {
     "start": "nodemon --exec bun run src/main/server.ts",

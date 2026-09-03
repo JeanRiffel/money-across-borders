@@ -49,7 +49,7 @@ src/
  │    │                        account-created-consumer.ts (npm run worker:account-created — see the
  │    │                        Resilience bullet below for its retry/DLQ/idempotency behavior),
  │    │                        remittance-completed-indexer.ts (npm run worker:remittance-indexer),
- │    │                        outbox-relay.ts (npm run worker:outbox-relay, RabbitMQ), and
+ │    │                        rabbitmq-outbox-relay.ts (npm run worker:outbox-relay, RabbitMQ), and
  │    │                        kafka-outbox-relay.ts (npm run worker:outbox-relay-kafka, Kafka) — none is
  │    │                        part of buildApp()
  │    ├── observability/       logger.ts (Pino), metrics.ts (prom-client), tracing.ts (OpenTelemetry) — see below
@@ -156,7 +156,7 @@ Key patterns to follow when extending this code:
   parameterized relay, so each can evolve its own retry/batching/backoff shape without the two brokers'
   concerns entangled together — they only ever share the `outbox_events` table itself, scoped by `broker` so
   neither ever claims a row the other owns:
-    - `infra/events/consumers/outbox-relay.ts` (`npm run worker:outbox-relay`, polls every 5s by default,
+    - `infra/events/consumers/rabbitmq-outbox-relay.ts` (`npm run worker:outbox-relay`, polls every 5s by default,
       `OUTBOX_RELAY_INTERVAL_MS`) — `findUnpublished(limit)` (implicit `'rabbitmq'`), calls RabbitMQ.
     - `infra/events/consumers/kafka-outbox-relay.ts` (`npm run worker:outbox-relay-kafka`, polls every 5s by
       default, `KAFKA_OUTBOX_RELAY_INTERVAL_MS`) — `findUnpublished(limit, 'kafka')`, calls Kafka.
@@ -194,10 +194,10 @@ Key patterns to follow when extending this code:
       Elasticsearch via `ElasticsearchRemittanceSearchIndex` (`infra/persistence/elasticsearch/`) — catches
       and logs its own indexing failures rather than crashing the consumer (same best-effort posture as
       `EventPublisher` itself), so a bad message is dropped, not retried forever.
-    - `outbox-relay.ts` (`npm run worker:outbox-relay`) is the RabbitMQ producer side of the `account.created`
+    - `rabbitmq-outbox-relay.ts` (`npm run worker:outbox-relay`) is the RabbitMQ producer side of the `account.created`
       pair above — see the Transactional Outbox bullet.
     - `kafka-outbox-relay.ts` (`npm run worker:outbox-relay-kafka`) is the Kafka producer side of the
-      `remittance.completed` pair above, kept as its own process rather than folded into `outbox-relay.ts` —
+      `remittance.completed` pair above, kept as its own process rather than folded into `rabbitmq-outbox-relay.ts` —
       see the Transactional Outbox bullet.
 
   `GET /remittances` (`SearchRemittancesUseCase`) is the CQRS read side these two feed: it reads from

@@ -203,7 +203,7 @@ Postgres-native equivalent demonstrated in `docs/concurrency-lab.md`).
 
   A row's `broker` column (`'rabbitmq' | 'kafka'`) says which relay owns it; two independent relay
   processes exist, each claiming only its own broker's rows and never touching the other's:
-    - `npm run worker:outbox-relay` (`outbox-relay.ts`) — RabbitMQ, `account.created`.
+    - `npm run worker:outbox-relay` (`rabbitmq-outbox-relay.ts`) — RabbitMQ, `account.created`.
     - `npm run worker:outbox-relay-kafka` (`kafka-outbox-relay.ts`) — Kafka, `remittance.completed`.
 
   Both poll for unpublished rows and leave a failed publish attempt for the next poll (no separate

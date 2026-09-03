@@ -38,7 +38,7 @@ once that TTL elapses.
   state machines is more surface area to keep correct than one well-tested library confined to a single
   file, for a showcase project whose point is demonstrating the *pattern*, not the state-machine
   implementation itself.
-- **A sleeping/polling worker for the RabbitMQ retry delay** (mirroring `outbox-relay.ts`'s own poll loop).
+- **A sleeping/polling worker for the RabbitMQ retry delay** (mirroring `rabbitmq-outbox-relay.ts`'s own poll loop).
   Rejected — it would need its own persistent "retry at" bookkeeping (a table or an in-memory timer list,
   the latter explicitly ruled out by the issue for exactly this reason: it doesn't survive a process
   restart), whereas the dead-letter-exchange approach gets a durable, broker-enforced delay for free from

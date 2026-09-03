@@ -78,14 +78,14 @@ export function createAccountCreatedConsumer(deps: AccountCreatedConsumerDeps) {
 
   async function handleMessage(message: Message): Promise<void> {
     const event = JSON.parse(message.content.toString()) as AccountCreatedEvent;
-    // The outbox row's id (see outbox-relay.ts) — stable across every
+    // The outbox row's id (see rabbitmq-outbox-relay.ts) — stable across every
     // redelivery and every retry-queue round trip of this same logical
     // event, unlike a per-delivery value we'd have to invent ourselves.
     const dedupeKey = message.properties.messageId as string | undefined;
 
     if (!dedupeKey) {
       // No stable id to dedupe on (e.g. a message published by something
-      // other than outbox-relay.ts) — process it best-effort, same as
+      // other than rabbitmq-outbox-relay.ts) — process it best-effort, same as
       // before this feature existed, rather than refusing to handle it.
       await processAndAck(message, event, null);
       return;

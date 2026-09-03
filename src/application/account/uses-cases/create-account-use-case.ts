@@ -34,7 +34,7 @@ export class CreateAccountUseCase implements UseCase<CreateAccountInput, CreateA
     // retry. Writing to the outbox instead happens *inside* the same
     // transaction as the User + Account saves (see doExecute), so the
     // event's durability is exactly as strong as the signup itself; a
-    // separate relay process (src/infra/events/consumers/outbox-relay.ts)
+    // separate relay process (src/infra/events/consumers/rabbitmq-outbox-relay.ts)
     // is the one that actually calls RabbitMQ, retrying on its next poll
     // until it succeeds.
     private readonly outboxRepository: OutboxRepository

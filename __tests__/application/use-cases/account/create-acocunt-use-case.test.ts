@@ -18,14 +18,14 @@ describe('CreateAccountUseCase', () => {
     )
 
     const input = CreateAccountInput.from({
-      email: 'john@test.com,',
+      email: 'john@test.com',
       password: '1234'
     })
 
     const useCase = await createUseCase.execute(input)
 
     expect(useCase.status).toEqual('OPEN')
-    expect(useCase.email).toEqual('john@test.com,')
+    expect(useCase.email).toEqual('john@test.com')
 
   })
 

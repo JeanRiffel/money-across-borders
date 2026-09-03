@@ -3,7 +3,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
 import { CreateAccountInput } from 'src/application/account/dto/create-account-input';
 import { CreateAccountOutput } from 'src/application/account/dto/create-account-output';
-import { EmailAlreadyExistsError, IdempotencyKeyInFlightError } from 'src/domain/shared/errors';
+import {
+  EmailAlreadyExistsError,
+  IdempotencyKeyInFlightError,
+  ValidationError,
+} from 'src/domain/shared/errors';
 
 // Postgres unique_violation. CreateAccountUseCase pre-checks email and
 // throws EmailAlreadyExistsError for the common (non-racing) case; this is
@@ -39,6 +43,9 @@ export class CreateAccountController {
         result: result,
       };
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return { statusCode: 400, result: error.message };
+      }
       if (error instanceof EmailAlreadyExistsError) {
         return { statusCode: 409, result: error.message };
       }

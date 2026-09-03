@@ -45,3 +45,4 @@ new ADR and mark the old one `Superseded by NNNN`.
 | [0006](0006-treasury-wallets-cross-currency.md) | System-owned treasury wallets for cross-currency ledger balancing |
 | [0007](0007-unit-of-work-transaction-boundary.md) | `UnitOfWork` as the transaction boundary for `SendRemittanceUseCase` |
 | [0008](0008-resilience-layer.md) | Resilience layer: `cockatiel`, and a broker-native RabbitMQ retry/DLQ |
+| [0009](0009-request-validation-with-zod.md) | Request validation with zod, confined to each input DTO |

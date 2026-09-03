@@ -32,6 +32,11 @@ const userRouter = (controller: LoginController): Router => {
    *               properties:
    *                 statusCode: { type: integer, example: 200 }
    *                 result: { $ref: '#/components/schemas/LoginOutput' }
+   *       400:
+   *         description: Request body failed validation.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
    *       401:
    *         description: Invalid credentials.
    *         content:

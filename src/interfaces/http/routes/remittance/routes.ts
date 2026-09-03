@@ -41,6 +41,11 @@ const remittanceRouter = (
    *               properties:
    *                 statusCode: { type: integer, example: 201 }
    *                 result: { $ref: '#/components/schemas/SendRemittanceOutput' }
+   *       400:
+   *         description: Request body failed validation.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
    *       401:
    *         description: Missing or invalid bearer token.
    *       403:
@@ -131,7 +136,9 @@ const remittanceRouter = (
    *                 statusCode: { type: integer, example: 200 }
    *                 result: { $ref: '#/components/schemas/SearchRemittancesOutput' }
    *       400:
-   *         description: accountId query parameter is missing.
+   *         description: >
+   *           accountId query parameter is missing or invalid, or another
+   *           query parameter (e.g. limit) failed validation.
    *         content:
    *           application/json:
    *             schema: { $ref: '#/components/schemas/ErrorResponse' }

@@ -2,7 +2,7 @@ import { Request } from 'express';
 import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
 import { LoginInput } from 'src/application/user/dto/login-input';
 import { LoginOutput } from 'src/application/user/dto/login-output';
-import { InvalidCredentialsError } from 'src/domain/shared/errors';
+import { InvalidCredentialsError, ValidationError } from 'src/domain/shared/errors';
 
 export class LoginController {
   constructor(private readonly loginUseCase: UseCase<LoginInput, LoginOutput>) {}
@@ -14,6 +14,9 @@ export class LoginController {
 
       return { statusCode: 200, result };
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return { statusCode: 400, result: error.message };
+      }
       if (error instanceof InvalidCredentialsError) {
         return { statusCode: 401, result: error.message };
       }

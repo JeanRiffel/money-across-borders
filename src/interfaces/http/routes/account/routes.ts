@@ -37,6 +37,11 @@ const accountRouter = (controller: CreateAccountController): Router => {
    *               properties:
    *                 statusCode: { type: integer, example: 201 }
    *                 result: { $ref: '#/components/schemas/CreateAccountOutput' }
+   *       400:
+   *         description: Request body failed validation.
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ErrorResponse' }
    *       409:
    *         description: An account with this email already exists.
    *         content:

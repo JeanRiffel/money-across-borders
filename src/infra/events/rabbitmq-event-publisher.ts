@@ -5,12 +5,12 @@ import { logger } from '../observability/logger';
 // No longer wired to any factory — account-factory.ts used to construct
 // this directly for CreateAccountUseCase, but account.created now goes
 // through the Transactional Outbox instead (see OutboxRepository /
-// outbox-relay.ts), specifically because this adapter's "never throws"
+// rabbitmq-outbox-relay.ts), specifically because this adapter's "never throws"
 // contract meant a failed/unreachable broker silently lost the event with
 // no way to retry. Kept anyway, same precedent as PostgresIdempotencyRepository
 // (still correct, just unused) — a plain best-effort EventPublisher is
 // still the right shape for an event that's genuinely fine to lose
-// occasionally, and outbox-relay.ts's own low-level RabbitMQ calls
+// occasionally, and rabbitmq-outbox-relay.ts's own low-level RabbitMQ calls
 // deliberately don't reuse this class (its swallow-and-log behavior is
 // exactly what the relay needs to NOT have).
 export class RabbitMQEventPublisher implements EventPublisher {

@@ -13,7 +13,7 @@ import { logger } from '../observability/logger';
 // correct, just unused) — a plain best-effort EventPublisher is still the
 // right shape for an event that's genuinely fine to lose occasionally.
 // kafka-outbox-relay.ts's own low-level Kafka producer calls deliberately
-// don't reuse this class, for the same reason outbox-relay.ts doesn't reuse
+// don't reuse this class, for the same reason rabbitmq-outbox-relay.ts doesn't reuse
 // RabbitMQEventPublisher: its swallow-and-log behavior is exactly what a
 // relay must NOT have.
 export class KafkaEventPublisher implements EventPublisher {

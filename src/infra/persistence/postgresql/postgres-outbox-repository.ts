@@ -42,7 +42,7 @@ export class PostgresOutboxRepository implements OutboxRepository {
     );
   }
 
-  // Used only by a relay process (outbox-relay.ts for 'rabbitmq',
+  // Used only by a relay process (rabbitmq-outbox-relay.ts for 'rabbitmq',
   // kafka-outbox-relay.ts for 'kafka'), never inside a business transaction
   // — deliberately not called via getExecutor()'s transaction-joining
   // behavior for anything beyond that default pool fallback, since a relay

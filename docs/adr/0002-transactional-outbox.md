@@ -19,7 +19,7 @@ nothing ever surfaces that loss. For an event meant to trigger a confirmation em
 (`migrations/003_create_outbox_events.sql`) from *inside* the same `UnitOfWork` transaction as the `User` +
 `Account` saves, via `OutboxRepository.add()` (`PostgresOutboxRepository`). The write either commits or
 rolls back together with the signup — there is no window where one exists without the other. A separate,
-standalone relay process (`npm run worker:outbox-relay`, `infra/events/consumers/outbox-relay.ts`) polls
+standalone relay process (`npm run worker:outbox-relay`, `infra/events/consumers/rabbitmq-outbox-relay.ts`) polls
 `outbox_events` for unpublished rows (default every 5s) and is the only thing that actually calls RabbitMQ
 for these — deliberately not via `RabbitMQEventPublisher`, whose swallow-and-log contract is wrong for a
 relay whose entire job is to notice a failed publish and retry it.

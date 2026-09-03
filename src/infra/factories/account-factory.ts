@@ -26,7 +26,7 @@ export function createAccountUseCase(): UseCase<CreateAccountInput, CreateAccoun
     // same transaction as the User + Account saves, instead of being
     // published to RabbitMQ directly — see the constructor comment on
     // CreateAccountUseCase for why. worker:outbox-relay
-    // (src/infra/events/consumers/outbox-relay.ts) is the process that
+    // (src/infra/events/consumers/rabbitmq-outbox-relay.ts) is the process that
     // actually delivers these to RabbitMQ.
     outboxRepository: postgresRegistry.outboxRepository,
   };

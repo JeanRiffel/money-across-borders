@@ -251,7 +251,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
-    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/outbox-relay.ts"]
+    entrypoint: ["npx", "ts-node", "src/infra/events/consumers/rabbitmq-outbox-relay.ts"]
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

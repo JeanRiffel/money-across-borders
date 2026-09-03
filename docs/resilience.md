@@ -117,7 +117,7 @@ FX_PROVIDER_URL=http://localhost:4010   # wherever `npm run demo:fake-fx-server`
 ## RabbitMQ retry + DLQ (`account.created`)
 
 `account-created-consumer.ts` extends the existing `account.created` flow (Transactional Outbox →
-`outbox-relay.ts` → RabbitMQ, see [adr/0002](adr/0002-transactional-outbox.md)) with explicit failed-message
+`rabbitmq-outbox-relay.ts` → RabbitMQ, see [adr/0002](adr/0002-transactional-outbox.md)) with explicit failed-message
 handling, entirely inside this one consumer — the outbox/relay pair, and the RabbitMQ-vs-Kafka choice per
 event (see [adr/0004](adr/0004-rabbitmq-vs-kafka.md)), are unchanged.
 
@@ -158,7 +158,7 @@ RabbitMQ (like essentially every message broker) delivers **at least once**, nev
 redelivery after a consumer crashes just after acting but before acking is a normal, expected occurrence,
 not a bug. This project does **not** claim exactly-once processing anywhere.
 
-`outbox-relay.ts` sets the AMQP `messageId` property to the outbox row's own id when it first publishes
+`rabbitmq-outbox-relay.ts` sets the AMQP `messageId` property to the outbox row's own id when it first publishes
 `account.created` — a stable identifier for one logical event that survives every redelivery and every
 retry-queue round trip (the consumer forwards it verbatim when it republishes to `.retry`/`.dlq`, rather than
 minting a new one). `account-created-consumer.ts` uses that id as the key for a claim/process/save-or-release
@@ -180,7 +180,7 @@ uses for the HTTP layer's account/wallet/remittance idempotency — see
   delivery of the same event (after the retry-queue TTL, same `messageId`) is allowed to actually attempt
   processing again instead of permanently reading as "in flight".
 
-A message with no `messageId` (e.g. hypothetically published by something other than `outbox-relay.ts`) is
+A message with no `messageId` (e.g. hypothetically published by something other than `rabbitmq-outbox-relay.ts`) is
 processed best-effort, without a dedupe guard — the same behavior this consumer had before this feature
 existed.
 

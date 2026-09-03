@@ -57,7 +57,7 @@ describe('CreateAccountUseCase', () => {
     })
 
     // Recorded, but not yet relayed — that's the outbox relay's job
-    // (src/infra/events/consumers/outbox-relay.ts), not this use case's.
+    // (src/infra/events/consumers/rabbitmq-outbox-relay.ts), not this use case's.
     const unpublished = await outboxRepository.findUnpublished(10)
     expect(unpublished).toHaveLength(1)
   })

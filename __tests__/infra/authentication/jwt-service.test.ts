@@ -54,5 +54,17 @@ describe('JWTService', () => {
 
       expect(() => jwtService.verify(invalidToken)).toThrow('Invalid token');
     });
+
+    it('preserves the original jsonwebtoken error as `cause`', () => {
+      const invalidToken = 'invalid.token.here';
+
+      try {
+        jwtService.verify(invalidToken);
+        fail('expected verify() to throw');
+      } catch (error) {
+        expect((error as Error).cause).toBeInstanceOf(Error);
+        expect(((error as Error).cause as Error).name).toBe('JsonWebTokenError');
+      }
+    });
   });
 });

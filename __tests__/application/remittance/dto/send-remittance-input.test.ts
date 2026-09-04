@@ -40,6 +40,19 @@ describe('SendRemittanceInput.from', () => {
     })).toThrow(/amountMinorUnits/)
   })
 
+  // A zero-value remittance has no financial effect but would still post a
+  // "COMPLETED" Remittance row and search-index document — rejected here,
+  // stricter than Money.fromMinorUnits's own bound (see the schema comment).
+  it('rejects a zero amountMinorUnits', () => {
+    expect(() => SendRemittanceInput.from({
+      senderAccountId: AccountId.generate().getValue(),
+      recipientAccountId: AccountId.generate().getValue(),
+      sourceCurrency: 'USD',
+      destinationCurrency: 'BRL',
+      amountMinorUnits: 0,
+    })).toThrow(/amountMinorUnits/)
+  })
+
   // Shape only — an unsupported-but-well-formed currency code is left to
   // UnsupportedCurrencyError downstream, not rejected here. See
   // docs/adr/0009-request-validation-with-zod.md.

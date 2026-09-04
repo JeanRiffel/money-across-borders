@@ -124,7 +124,7 @@ const remittanceRouter = (
    *       - name: limit
    *         in: query
    *         required: false
-   *         schema: { type: integer }
+   *         schema: { type: integer, maximum: 100 }
    *     responses:
    *       200:
    *         description: Matching remittances.

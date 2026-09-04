@@ -30,4 +30,13 @@ describe('SearchRemittancesInput.from', () => {
       limit: 'not-a-number',
     })).toThrow(/limit/)
   })
+
+  // limit is forwarded straight to Elasticsearch's `size` — capped so a
+  // caller can't request an unbounded page (see MAX_SEARCH_LIMIT).
+  it('rejects a limit above the maximum', () => {
+    expect(() => SearchRemittancesInput.from({
+      accountId: AccountId.generate().getValue(),
+      limit: '101',
+    })).toThrow(/limit/)
+  })
 })

@@ -22,7 +22,12 @@ export class JWTService implements TokenGenerator, TokenVerifier {
       const decoded = jwt.verify(token, secret);
       return decoded;
     } catch (error) {
-      throw new Error('Invalid token');
+      // Message stays the generic 'Invalid token' (callers, e.g.
+      // authMiddleware, treat every verification failure the same way), but
+      // the original jsonwebtoken error (TokenExpiredError,
+      // JsonWebTokenError, ...) is preserved as `cause` so it isn't lost for
+      // whoever logs it — see authMiddleware's catch block.
+      throw new Error('Invalid token', { cause: error });
     }
   }
 }

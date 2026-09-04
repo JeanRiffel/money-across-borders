@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { parseOrThrow } from '../../shared/validation/parse-or-throw';
 
+// Caps how large a page a caller can request — limit is forwarded straight
+// to Elasticsearch's own `size` (see ElasticsearchRemittanceSearchIndex.search),
+// which has no ceiling of its own.
+export const MAX_SEARCH_LIMIT = 100;
+
 // status/from/to are left as loose optional strings — the search index
 // forwards them as-is (no enum/date-format enforcement exists downstream
 // today), so this schema doesn't invent one. See
@@ -10,7 +15,7 @@ const searchRemittancesInputSchema = z.object({
   status: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  limit: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().max(MAX_SEARCH_LIMIT).optional(),
 });
 
 export class SearchRemittancesInput {

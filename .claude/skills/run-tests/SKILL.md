@@ -1,5 +1,5 @@
 ---
-name: Run Tests
+name: run-tests
 description: Run the Jest use-case test suite (npm test), optionally scoped to a pattern, no external services needed
 allowed-tools: Bash(npm test*)
 ---

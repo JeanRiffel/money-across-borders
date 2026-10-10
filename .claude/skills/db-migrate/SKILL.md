@@ -1,5 +1,5 @@
 ---
-name: Database Migrate
+name: db-migrate
 description: Apply Postgres migrations (npm run db:migrate) against the reachable database
 disable-model-invocation: true
 allowed-tools: Bash(npm run db:migrate*)

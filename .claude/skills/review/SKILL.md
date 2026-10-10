@@ -1,5 +1,5 @@
 ---
-name: Review
+name: review
 description: Review the current diff against this project's architecture, financial invariants, concurrency/idempotency/transaction concerns, and security — read-only, never edits files
 disable-model-invocation: true
 allowed-tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Bash(git show*), Bash(git status*)

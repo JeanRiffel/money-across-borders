@@ -1,5 +1,5 @@
 ---
-name: Concurrency Lab
+name: concurrency-lab
 description: Run the Postgres locking/isolation/idempotency concurrency lab (npm run test:concurrency)
 disable-model-invocation: true
 allowed-tools: Bash(npm run test:concurrency*)

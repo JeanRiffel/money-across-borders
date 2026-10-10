@@ -1,5 +1,5 @@
 ---
-name: Docker Stack
+name: docker-stack
 description: Bring up the full app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + workers via docker compose
 disable-model-invocation: true
 allowed-tools: Bash(docker compose*)

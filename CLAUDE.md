@@ -23,6 +23,7 @@ until invoked, so adding more doesn't cost tokens on every turn.
 | `/lint-format` | `npm run lint:fix && npm run format` | Not covered by the Husky pre-commit hook (which only runs `npm test`). |
 | `/docker-stack` | `docker compose up --build` | Full stack — app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + workers. Manual-only, heavyweight. |
 | `/review` | (no command — reads the diff directly) | Read-only structured review against this project's architecture/invariants/concurrency/security concerns — see [docs/invariants.md](docs/invariants.md). Never edits files. Manual-only. |
+| `/task-context <task>` | (no command — reads docs/source directly) | Task-specific discovery: relevant docs, source, invariants, risks, validation. Only write is its report, `specs/<task-id>-<task-slug>/context.md` (asks before overwriting). Never edits application code. |
 
 Skills marked manual-only (`disable-model-invocation: true`) either touch a real database, the filesystem
 broadly, or spin up containers, or (like `/review`) represent a deliberate, heavier pass the user should

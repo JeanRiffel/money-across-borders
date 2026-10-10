@@ -5,7 +5,7 @@ description: >
   development task. Use before planning or implementing
   non-trivial changes, especially those involving financial
   invariants, concurrency, persistence, or messaging.
-allowed-tools: Read, Grep, Glob, Bash(git status*), Bash(git log*), Bash(git show*)
+allowed-tools: Read, Grep, Glob, Write(specs/**), Bash(git status*), Bash(git log*), Bash(git show*)
 ---
 
 # Task Context Discovery
@@ -17,8 +17,10 @@ plan, and safely implement a development task.
 
 This skill performs context discovery only.
 
-It must not modify files, implement code, execute tests,
-or perform destructive operations.
+Its only write is the report described in "Output Persistence"
+(specs/<task-id>-<task-slug>/context.md). It must not modify
+any other file, implement code, execute tests, or perform
+destructive operations.
 
 ## Input
 
@@ -242,6 +244,7 @@ Explain the classification.
 
 ## Constraints
 
+- Do not modify any file other than the context report.
 - Do not generate implementation code.
 - Do not execute tests.
 - Do not perform database operations.

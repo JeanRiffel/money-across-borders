@@ -23,6 +23,7 @@ until invoked, so adding more doesn't cost tokens on every turn.
 | `/lint-format` | `npm run lint:fix && npm run format` | Not covered by the Husky pre-commit hook (which only runs `npm test`). |
 | `/docker-stack` | `docker compose up --build` | Full stack — app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + workers. Manual-only, heavyweight. |
 | `/review` | (no command — reads the diff directly) | Read-only structured review against this project's architecture/invariants/concurrency/security concerns — see [docs/invariants.md](docs/invariants.md). Never edits files. Manual-only. |
+| `/task-context <task>` | (no command — reads docs/source directly) | Task-specific discovery: relevant docs, source, invariants, risks, validation. Only write is its report, `specs/<task-id>-<task-slug>/context.md` (asks before overwriting). Never edits application code. |
 
 Skills marked manual-only (`disable-model-invocation: true`) either touch a real database, the filesystem
 broadly, or spin up containers, or (like `/review`) represent a deliberate, heavier pass the user should
@@ -31,5 +32,3 @@ trigger explicitly rather than one Claude reaches for on its own — they only r
 this same boundary generalized across all tooling, not just Claude skills. Add new skills the same way: point
 `allowed-tools` narrowly at what the skill actually needs, and link back to the relevant `docs/*.md` instead
 of duplicating it.
-
-| `/task-context <task>` | (read-only discovery) | Identifies task-specific documentation, source, invariants, risks, and validation; does not modify files. |

@@ -1,5 +1,5 @@
 ---
-name: Seed Test Data
+name: seed-data
 description: Generate deterministic financial fixture data (customers, wallets, remittances) into Postgres via npm run seed
 disable-model-invocation: true
 allowed-tools: Bash(npm run seed*)

@@ -1,5 +1,5 @@
 ---
-name: Lint and Format
+name: lint-format
 description: Auto-fix lint issues and format the codebase (eslint --fix and prettier --write)
 allowed-tools: Bash(npm run lint*) Bash(npm run format*)
 ---

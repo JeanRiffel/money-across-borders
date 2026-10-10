@@ -31,3 +31,5 @@ trigger explicitly rather than one Claude reaches for on its own — they only r
 this same boundary generalized across all tooling, not just Claude skills. Add new skills the same way: point
 `allowed-tools` narrowly at what the skill actually needs, and link back to the relevant `docs/*.md` instead
 of duplicating it.
+
+| `/task-context <task>` | (read-only discovery) | Identifies task-specific documentation, source, invariants, risks, and validation; does not modify files. |

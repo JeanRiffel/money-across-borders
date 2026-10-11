@@ -24,6 +24,7 @@ until invoked, so adding more doesn't cost tokens on every turn.
 | `/docker-stack` | `docker compose up --build` | Full stack — app + Postgres + Redis + RabbitMQ + Kafka + Elasticsearch + workers. Manual-only, heavyweight. |
 | `/review` | (no command — reads the diff directly) | Read-only structured review against this project's architecture/invariants/concurrency/security concerns — see [docs/invariants.md](docs/invariants.md). Never edits files. Manual-only. |
 | `/task-context <task>` | (no command — reads docs/source directly) | Task-specific discovery: relevant docs, source, invariants, risks, validation. Only write is its report, `specs/<task-id>-<task-slug>/context.md` (asks before overwriting). Never edits application code. |
+| `/onboarding [step]` | (no command — reads docs/source directly) | Interactive walkthrough of [docs/onboarding/README.md](docs/onboarding/README.md) for new engineers. Read-only. Hands off to `/task-context` for the first contribution. Manual-only. |
 
 Skills marked manual-only (`disable-model-invocation: true`) either touch a real database, the filesystem
 broadly, or spin up containers, or (like `/review`) represent a deliberate, heavier pass the user should

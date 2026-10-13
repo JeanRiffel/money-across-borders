@@ -186,6 +186,12 @@ Pino structured logs (shipped to Loki if `LOKI_URL` is set), Prometheus RED metr
 and OpenTelemetry traces exported to Tempo. All three degrade gracefully — an unreachable Loki/Tempo
 doesn't block boot or fail a request.
 
+Health: `GET /health` is liveness only (the process is up); `GET /health/ready` returns `503` unless
+Postgres and Redis actually answer — use that one for monitors and load balancers. Unexpected errors are
+returned to clients as a generic `500 "Internal server error"`; the real error is in the logs (Loki), tagged
+with the use case name. On `SIGTERM`/`SIGINT` the server closes HTTP first, then Postgres/Redis/tracing, and
+always exits within 10s — see `src/main/graceful-shutdown.ts`.
+
 ⚠️ The `account.created`/`remittance.completed` **events themselves** are `UnitOfWork`-grade now (written
 to `outbox_events` inside the same transaction as the business write — see the Transactional Outbox bullet
 above); it's only each relay's actual broker call that stays best-effort-with-retry, never silently giving

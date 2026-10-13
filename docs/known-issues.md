@@ -60,4 +60,13 @@ since it only worked by the same kind of import-order luck. And: `mongo-database
 `process.env.MONGO_DB` for the database name — neither var existed anywhere — fixed to build the connection
 string from `MONGO_HOST`/`MONGO_PORT`/`MONGO_USER`/`MONGO_PASSWORD` and read `MONGO_DATABASE`, matching
 every other service's HOST/PORT/USER/PASSWORD convention. Both were non-fatal, so both were silently broken
-rather than loudly, for a while.
+rather than loudly, for a while. And (2026-10-13): signup failed with `500 "Error on createAccountUseCase:
+Error: The client is closed"` because the API process had received `SIGTERM`, closed its Postgres pool and
+Redis client, but never exited — `server.ts`'s shutdown handler was fire-and-forget with no timeout, so a
+hung step skipped `process.exit(0)`, and the half-closed process kept `PORT` and every request (`/login`
+failed the same way with "Cannot use a pool after calling end on the pool") while `GET /health` still said
+`ok`. Fixed by `src/main/graceful-shutdown.ts` (HTTP server closed first, per-step error isolation,
+re-entrancy guard, 10s force-exit; `tracing.ts`'s competing signal handlers removed), `GET /health/ready`
+(`src/main/readiness.ts`), and controllers no longer echoing raw errors in 500 bodies
+(`internal-error.ts`). If you ever see either message again, check for a stale process on `PORT`
+(`ss -ltnp | grep :3000`) before debugging Redis/Postgres themselves.

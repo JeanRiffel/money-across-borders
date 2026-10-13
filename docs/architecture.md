@@ -259,8 +259,13 @@ Key patterns to follow when extending this code:
   lifecycle) plus a `getExecutor()` helper for transaction-awareness (see the `UnitOfWork` bullet above) —
   no `PostgresDatabase implements DatabaseStrategy<Pool>` wrapper exists, since nothing needed the
   connect/disconnect abstraction Mongo's version provides. `server.ts` fails fast if Postgres isn't
-  reachable at boot (`pool.query('SELECT 1')`, `process.exit(1)` on failure) and closes the pool on
-  `SIGTERM`/`SIGINT` — the first graceful-shutdown hooks in this codebase.
+  reachable at boot (`pool.query('SELECT 1')`, `process.exit(1)` on failure). On `SIGTERM`/`SIGINT` it runs
+  `src/main/graceful-shutdown.ts`: HTTP server first (so no request reaches a closed dependency), then the
+  Postgres pool, Redis, and OpenTelemetry — each failure logged without aborting the rest, a second signal
+  ignored, and a 10s force-exit so a hung step can never leave a half-closed process bound to `PORT`
+  (which is exactly what used to happen: requests failed with "The client is closed" from a process that
+  never exited). `GET /health` is liveness only; `GET /health/ready` (`src/main/readiness.ts`) returns 503
+  unless Postgres and Redis actually answer — point monitors/load balancers at that one.
 - Tests mirror `src/`'s path structure under `__tests__/` (e.g. `src/domain/account/entities/account.ts` →
   `__tests__/domain/entities/account.test.ts`) and prefer `InMemory*` repository fakes over mocking
   frameworks for use-case tests.

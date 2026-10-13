@@ -1,5 +1,6 @@
 // Must be the first import in the process — see tracing.ts for why.
-import '../infra/observability/tracing';
+import { shutdownTracing } from '../infra/observability/tracing';
+import { Server } from 'http';
 import express, { Express, Request, Response } from 'express';
 import pinoHttp from 'pino-http';
 import dotenv from 'dotenv';
@@ -30,7 +31,14 @@ import { createJWTService } from '../infra/factories/jwt-factory';
 import { pool } from '../infra/config/database/postgresql/pg';
 import { connectRedis, redisClient } from '../infra/config/database/redis/redisClient';
 import { elasticsearchClient } from '../infra/config/database/elasticsearch/elasticsearch-client';
+import { createGracefulShutdown } from './graceful-shutdown';
+import { runReadinessChecks } from './readiness';
 dotenv.config();
+
+const READINESS_CHECK_TIMEOUT_MS = 2_000;
+// Upper bound on the whole shutdown sequence — past this the process is
+// force-exited rather than lingering half-closed (see graceful-shutdown.ts).
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 // Wires the Express app (Mongo check, Postgres check, all routers) without
 // calling app.listen(). Split out from startServer() so integration tests
@@ -46,6 +54,25 @@ export const buildApp = async (): Promise<Express> => {
 
   app.get('/health', (_req: Request, res: Response) => {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Readiness, as opposed to /health's liveness: 503 unless Postgres and
+  // Redis actually answer — see readiness.ts. Unauthenticated like /health,
+  // so it reports only ok/fail per dependency and logs the real errors.
+  app.get('/health/ready', async (_req: Request, res: Response) => {
+    const { ready, checks, errors } = await runReadinessChecks(
+      [
+        { name: 'postgres', check: () => pool.query('SELECT 1') },
+        { name: 'redis', check: () => redisClient.ping() },
+      ],
+      READINESS_CHECK_TIMEOUT_MS
+    );
+    if (!ready) logger.error({ errors }, 'Readiness check failed');
+    return res.status(ready ? 200 : 503).json({
+      status: ready ? 'ok' : 'unavailable',
+      checks,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // Unauthenticated, like /health above — the Prometheus scraper has no JWT.
@@ -154,26 +181,50 @@ const startServer = async () => {
     process.exit(1);
   }
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     logger.info(`✓ Server is running on port ${port}`);
   });
+
+  registerShutdownHandlers(server);
 };
 
-// First shutdown hooks in this codebase — nothing closed the Postgres pool
-// on exit before now (it also didn't need to, being unused). Mongo's client
-// is left as-is here: still non-fatal/unused by this slice, out of scope.
-// Redis is closed alongside Postgres now that it's load-bearing too (see
-// the connectRedis() call above).
-const shutdown = async (signal: string): Promise<void> => {
-  logger.info(`${signal} received, closing Postgres pool and Redis connection...`);
-  await pool.end();
-  if (redisClient.isOpen) {
-    await redisClient.quit();
-  }
-  process.exit(0);
+// Registered inside startServer() (not at module level) because it needs the
+// listening server, and so importing buildApp (Cucumber suite) doesn't
+// install process-wide signal handlers as a side effect. Order matters:
+// stop accepting HTTP traffic first, so no request can reach a repository
+// whose Postgres pool or Redis client is already closed. Mongo's client is
+// left as-is: non-fatal and degradable (see buildApp), out of scope.
+const registerShutdownHandlers = (server: Server): void => {
+  const shutdown = createGracefulShutdown({
+    timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    log: logger,
+    exit: (code) => process.exit(code),
+    steps: [
+      {
+        name: 'HTTP server',
+        close: () =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+            // Keep-alive sockets (e.g. the Next.js BFF's) would otherwise
+            // hold server.close() open until they time out on their own.
+            // Optional-called since `npm start` runs under Bun's node:http
+            // compat layer, not Node itself.
+            server.closeIdleConnections?.();
+          }),
+      },
+      { name: 'Postgres pool', close: () => pool.end() },
+      {
+        name: 'Redis client',
+        close: async () => {
+          if (redisClient.isOpen) await redisClient.quit();
+        },
+      },
+      { name: 'OpenTelemetry tracing', close: shutdownTracing },
+    ],
+  });
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 };
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-process.on('SIGINT', () => void shutdown('SIGINT'));
 
 // Guarded so importing buildApp (e.g. from the Cucumber integration suite,
 // see features/support/) doesn't also boot a second server on the fixed

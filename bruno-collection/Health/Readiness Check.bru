@@ -1,0 +1,18 @@
+meta {
+  name: Readiness Check
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/health/ready
+  body: none
+  auth: none
+}
+
+docs {
+  Readiness check: 200 only if Postgres (SELECT 1) and Redis (PING) both
+  answer within 2s, otherwise 503 with {"checks": {"postgres": "ok|fail",
+  "redis": "ok|fail"}}. Failure reasons are logged, not returned. Use this
+  (not /health, which is liveness only) for monitors and load balancers.
+}

@@ -39,10 +39,8 @@ try {
   console.error('⚠ OpenTelemetry tracing failed to start, continuing without it:', error);
 }
 
-const shutdownTracing = (): void => {
-  sdk
-    .shutdown()
-    .catch((error) => console.error('⚠ Error shutting down OpenTelemetry tracing:', error));
-};
-process.on('SIGTERM', shutdownTracing);
-process.on('SIGINT', shutdownTracing);
+// Called as one step of server.ts's graceful shutdown (see
+// src/main/graceful-shutdown.ts) rather than from its own SIGTERM/SIGINT
+// handlers: a second, independent pair of handlers here used to race the
+// server's own shutdown, with nothing ensuring the process actually exited.
+export const shutdownTracing = (): Promise<void> => sdk.shutdown();

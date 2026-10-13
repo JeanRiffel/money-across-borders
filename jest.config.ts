@@ -16,6 +16,9 @@ export default {
     '<rootDir>/__tests__/infra/seed/integration/',
   ],
   moduleFileExtensions: ['ts', 'js', 'json'],
+  // Mirrors tsconfig.json's `paths` ("src/*") — controllers and factories
+  // import via that alias, which Jest can't resolve on its own.
+  moduleNameMapper: { '^src/(.*)$': '<rootDir>/src/$1' },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',

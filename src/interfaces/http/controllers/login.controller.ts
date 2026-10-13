@@ -3,6 +3,7 @@ import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
 import { LoginInput } from 'src/application/user/dto/login-input';
 import { LoginOutput } from 'src/application/user/dto/login-output';
 import { InvalidCredentialsError, ValidationError } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 export class LoginController {
   constructor(private readonly loginUseCase: UseCase<LoginInput, LoginOutput>) {}
@@ -20,7 +21,7 @@ export class LoginController {
       if (error instanceof InvalidCredentialsError) {
         return { statusCode: 401, result: error.message };
       }
-      return { statusCode: 500, result: `Error on LoginUseCase: ${error}` };
+      return internalErrorResponse('LoginUseCase', error);
     }
   }
 }

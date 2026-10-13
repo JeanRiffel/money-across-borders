@@ -9,6 +9,7 @@ import {
   IdempotencyKeyInFlightError,
   ValidationError,
 } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 // Postgres unique_violation. OpenWalletUseCase's find-then-insert isn't
 // concurrency-safe on its own — two requests for the same (account,
@@ -53,7 +54,7 @@ export class OpenWalletController {
           result: `Account ${req.body.accountId} already has a wallet in ${req.body.currency}`,
         };
       }
-      return { statusCode: 500, result: `Error on OpenWalletUseCase: ${error}` };
+      return internalErrorResponse('OpenWalletUseCase', error);
     }
   }
 }

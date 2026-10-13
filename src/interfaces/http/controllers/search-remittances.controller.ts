@@ -3,6 +3,7 @@ import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
 import { SearchRemittancesInput } from 'src/application/remittance/dto/search-remittances-input';
 import { SearchRemittancesOutput } from 'src/application/remittance/dto/search-remittances-output';
 import { ValidationError } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 export class SearchRemittancesController {
   constructor(
@@ -34,7 +35,7 @@ export class SearchRemittancesController {
       if (error instanceof ValidationError) {
         return { statusCode: 400, result: error.message };
       }
-      return { statusCode: 500, result: `Error on SearchRemittancesUseCase: ${error}` };
+      return internalErrorResponse('SearchRemittancesUseCase', error);
     }
   }
 }

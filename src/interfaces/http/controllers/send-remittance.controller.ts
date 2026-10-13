@@ -13,6 +13,7 @@ import {
   IdempotencyKeyInFlightError,
   ValidationError,
 } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 export class SendRemittanceController {
   constructor(
@@ -51,7 +52,7 @@ export class SendRemittanceController {
       if (error instanceof IdempotencyKeyInFlightError) {
         return { statusCode: 409, result: error.message };
       }
-      return { statusCode: 500, result: `Error on SendRemittanceUseCase: ${error}` };
+      return internalErrorResponse('SendRemittanceUseCase', error);
     }
   }
 }

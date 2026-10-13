@@ -8,6 +8,7 @@ import {
   IdempotencyKeyInFlightError,
   ValidationError,
 } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 // Postgres unique_violation. CreateAccountUseCase pre-checks email and
 // throws EmailAlreadyExistsError for the common (non-racing) case; this is
@@ -55,10 +56,7 @@ export class CreateAccountController {
       if ((error as any)?.code === POSTGRES_UNIQUE_VIOLATION) {
         return { statusCode: 409, result: 'An account with this email already exists' };
       }
-      return {
-        statusCode: 500,
-        result: `Error on createAccountUseCase: ${error} `,
-      };
+      return internalErrorResponse('CreateAccountUseCase', error);
     }
   }
 }

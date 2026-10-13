@@ -24,8 +24,8 @@ End-to-end and reachable over HTTP today: create an account (`POST /account`), l
 open a wallet (`POST /wallets`), submit KYC (`POST /kyc`), send a remittance (`POST /remittances`), and
 search remittances (`GET /remittances`). Interactive docs for all of the above are served at `GET /docs`
 (Swagger UI, generated from `@openapi` JSDoc blocks in `src/interfaces/http/routes/*/routes.ts` — see
-`src/interfaces/http/docs/swagger.ts`); it's unauthenticated, like `/health` and `/metrics`. This flow is
-**Postgres-backed**
+`src/interfaces/http/docs/swagger.ts`); it's unauthenticated, like `/health`, `/health/ready` (readiness:
+503 unless Postgres and Redis answer) and `/metrics`. This flow is **Postgres-backed**
 (`src/infra/persistence/postgresql/postgres-registry.ts`, wired into every `*-factory.ts`) — the app
 requires a reachable, migrated Postgres to boot at all (`server.ts` fails fast, `process.exit(1)`, if the
 connection check fails). `npm test`'s use-case tests still run entirely against the **in-memory** repos

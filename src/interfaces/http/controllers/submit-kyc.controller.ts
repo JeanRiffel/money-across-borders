@@ -4,6 +4,7 @@ import { UseCase } from 'src/application/shared/idempotency/common-use-case.';
 import { SubmitKycInput } from 'src/application/compliance/dto/submit-kyc-input';
 import { SubmitKycOutput } from 'src/application/compliance/dto/submit-kyc-output';
 import { IdempotencyKeyInFlightError, ValidationError } from 'src/domain/shared/errors';
+import { internalErrorResponse } from './internal-error';
 
 export class SubmitKycController {
   constructor(
@@ -27,7 +28,7 @@ export class SubmitKycController {
       if (error instanceof IdempotencyKeyInFlightError) {
         return { statusCode: 409, result: error.message };
       }
-      return { statusCode: 500, result: `Error on SubmitKycUseCase: ${error}` };
+      return internalErrorResponse('SubmitKycUseCase', error);
     }
   }
 }

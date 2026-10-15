@@ -107,6 +107,9 @@ jobs:
       - name: Apply migrations
         run: npm run db:migrate
 
+      - name: Run Postgres repository tests
+        run: npm run test:db
+
       - name: Run integration tests (Cucumber, real Express app + Postgres + Redis)
         run: npm run test:integration
 

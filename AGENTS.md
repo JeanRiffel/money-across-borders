@@ -102,6 +102,7 @@ npm test -- <pattern>    # run a subset, e.g. npm test -- create-account
 npm run test:watch
 npm run test:coverage
 
+npm run test:db           # wallet repository characterization; real Postgres, run db:migrate first
 npm run test:integration  # Cucumber, needs a reachable, migrated Postgres
 npm run test:concurrency  # Postgres concurrency lab (locking/isolation/idempotency), needs the same
 

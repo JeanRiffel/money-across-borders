@@ -12,6 +12,8 @@ export default {
   // __tests__/infra/seed/** is a plain unit test and stays in this suite.
   testPathIgnorePatterns: [
     '/node_modules/',
+    // Real Postgres repository tests run separately via npm run test:db.
+    '<rootDir>/__tests__/infra/persistence/postgresql/',
     '<rootDir>/__tests__/concurrency/',
     '<rootDir>/__tests__/infra/seed/integration/',
   ],

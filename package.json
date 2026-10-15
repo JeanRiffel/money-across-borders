@@ -70,6 +70,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:integration": "cucumber-js",
+    "test:db": "jest --config jest.db.config.ts",
     "test:seed": "jest --config jest.seed.config.ts",
     "test:concurrency": "jest --config jest.concurrency.config.ts",
     "lint": "eslint src --ext .ts",

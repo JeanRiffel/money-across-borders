@@ -13,4 +13,14 @@ export class MongoDatabaseSingleton {
     }
     return this.instance;
   }
+
+  // Closes the client only if getInstance() connected one, so a caller
+  // tearing down (e.g. the Cucumber suite) never opens a connection just to
+  // close it.
+  public static async disconnect(): Promise<void> {
+    if (this.instance) {
+      await this.instance.disconnect();
+      this.instance = null;
+    }
+  }
 }

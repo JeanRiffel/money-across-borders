@@ -50,6 +50,9 @@ jobs:
   integration:
     name: Integration & concurrency checks (Postgres + Redis)
     runs-on: ubuntu-latest
+    # A suite that never exits (an open handle) otherwise runs until GitHub's
+    # 6-hour job limit; fail fast instead.
+    timeout-minutes: 20
 
     services:
       postgres:

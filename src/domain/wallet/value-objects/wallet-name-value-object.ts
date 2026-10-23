@@ -10,13 +10,19 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 export class WalletName {
   private constructor(private readonly value: string) {}
 
-  // Normalizes before validating: whitespace (including tabs, newlines and
-  // other Unicode spaces) is trimmed and collapsed first, so only control
-  // characters that aren't whitespace are left to reject. \s alone misses
-  // U+0085 (NEXT LINE), which Unicode classes as both Cc and White_Space;
-  // \p{White_Space} alone misses U+FEFF, which \s covers — so use both.
+  // Normalizes before validating. NFC comes first, so a composed "é" and
+  // "e" + combining accent store and compare as the same name (NFC, not
+  // NFKC: ligatures and full-width forms are kept as typed). Whitespace
+  // (including tabs, newlines and other Unicode spaces) is then trimmed and
+  // collapsed, so only control characters that aren't whitespace are left
+  // to reject. \s alone misses U+0085 (NEXT LINE), which Unicode classes as
+  // both Cc and White_Space; \p{White_Space} alone misses U+FEFF, which \s
+  // covers — so use both.
   static from(raw: string): WalletName {
-    const value = raw.replace(/[\s\p{White_Space}]+/gu, ' ').trim();
+    const value = raw
+      .normalize('NFC')
+      .replace(/[\s\p{White_Space}]+/gu, ' ')
+      .trim();
 
     if (value.length === 0) {
       throw new ValidationError('Wallet name must not be empty');

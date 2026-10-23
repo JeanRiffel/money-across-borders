@@ -9,6 +9,38 @@ jest.mock('../../../src/infra/observability/logger', () => ({
 }))
 
 describe('WalletName', () => {
+  describe('NFC normalization (NW-12)', () => {
+    it('should return the NFC form of a decomposed accent', () => {
+      expect(WalletName.from('e\u{0301}').getValue()).toBe('\u{00E9}')
+    })
+
+    it.each([
+      ['same case', 'e\u{0301}pargne', '\u{00E9}pargne'],
+      ['different case', 'E\u{0301}pargne', '\u{00E9}PARGNE'],
+    ])('should equate composed and decomposed names with %s', (_label, decomposed, composed) => {
+      const left = WalletName.from(decomposed)
+      const right = WalletName.from(composed)
+
+      expect(left.equals(right)).toBe(true)
+      expect(right.equals(left)).toBe(true)
+    })
+
+    it('should accept 40 decomposed accents as 40 graphemes', () => {
+      expect(() => WalletName.from('e\u{0301}'.repeat(40))).not.toThrow()
+    })
+
+    it('should reject 41 decomposed accents as over 40 graphemes', () => {
+      expect(() => WalletName.from('e\u{0301}'.repeat(41))).toThrow(ValidationError)
+    })
+
+    it.each([
+      ['fi ligature', '\u{FB01}'],
+      ['full-width digits', '\u{FF11}\u{FF12}\u{FF13}'],
+    ])('should preserve %s without compatibility folding', (_label, name) => {
+      expect(WalletName.from(name).getValue()).toBe(name)
+    })
+  })
+
   const graphemes = [
     ['ASCII', 'a'],
     ['family emoji with ZWJ', '\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}'],
@@ -51,12 +83,12 @@ describe('WalletName', () => {
   )
 
   it.each(graphemes)('should accept one grapheme: %s', (_label, grapheme) => {
-    expect(WalletName.from(grapheme).getValue()).toBe(grapheme)
+    expect(WalletName.from(grapheme).getValue()).toBe(_label === 'decomposed accent' ? '\u{00E9}' : grapheme)
   })
 
   it.each(graphemes)('should accept exactly 40 graphemes: %s', (_label, grapheme) => {
     const name = grapheme.repeat(40)
-    expect(WalletName.from(name).getValue()).toBe(name)
+    expect(WalletName.from(name).getValue()).toBe(_label === 'decomposed accent' ? '\u{00E9}'.repeat(40) : name)
   })
 
   it.each(graphemes)('should reject 41 graphemes: %s', (_label, grapheme) => {
